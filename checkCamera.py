@@ -16,24 +16,28 @@ from SignalExtractionAndAnalysis import Analysis_PPG_SPG
 
 
 class Main():
-    def __init__(self, exposure_time=2200):
+    def __init__(self, port_name='COM10', exposure_time=2200, name: str = 'unknown', fps=30, size=(600, 600), lenght=20):
         # self.cap = EasyPySpin.VideoCapture(0)
         # self.cap.set(cv2.CAP_PROP_EXPOSURE, 1500)
 
-        self.frame = 600
-        self.fps = 30
+        self.frame: tuple = size
+        self.fps = fps
+        self.length = lenght
         self.ExposureTime = exposure_time
         self.stop = False
 
-        self.video_path = 'video.avi'
-        self.serial_path = 'serial.xlsx'
+        self.current_time = datetime.now().strftime("%Y-%m-%d %H_%M_%S")
+        self.video_path = 'storage/%s %s %s %s %s/video.avi' % (
+            self.current_time, name, exposure_time, fps, size)
+        self.serial_path = 'storage/%s %s %s %s %s/serial.xlsx' % (
+            self.current_time, name, exposure_time, fps, size)
         self.first_frame_time = None
         self.last_frame_time = None
 
         self.custom_header = ['Data', 'Time', 'Value',
                               'Status', 'Checksum', "Hex Data", "Raw Data"]
 
-        self.port_name = 'COM3'
+        self.port_name = port_name
         self.baudrate = 112500
         self.ser = serial.Serial(port=self.port_name, baudrate=self.baudrate, parity=serial.PARITY_NONE,
                                  stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS, timeout=1)
@@ -68,6 +72,8 @@ class Main():
                     shutil.rmtree(file_path)
             except Exception as e:
                 print('Failed to delete %s. Reason: %s' % (file_path, e))
+        os.makedirs('storage', exist_ok=True)
+        os.makedirs('temp', exist_ok=True)
 
     def __del__(self):
         self.ser.close()
@@ -122,8 +128,11 @@ class Main():
     def save_video_by_pyspin(self):
         time.sleep(1)
         with Camera() as cam:
-            cam.Width = self.frame
-            cam.Height = self.frame
+            cam.Width = self.frame[0]
+            cam.Height = self.frame[1]
+
+            cam.OffsetX = (cam.SensorWidth - cam.Width) // 2
+            cam.OffsetY = (cam.SensorHeight - cam.Height) // 2
 
             cam.AcquisitionFrameRateAuto = 'Off'
             cam.AcquisitionFrameRateEnabled = True
@@ -140,7 +149,7 @@ class Main():
             imgs_with_timestamps = []
             temp = []
 
-            for n in range(600):
+            for n in range(self.length*self.fps):
                 img_array = cam.get_array()
                 temp.append(img_array)
                 timestamp = datetime.timestamp(datetime.now())
@@ -197,8 +206,8 @@ class Main():
 
             img = cv2.imread(os.path.join(self.image_folder, image))
             # Overlay the timestamp on the image
-            cv2.putText(img, f"Time: {timestamp}", (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            # cv2.putText(img, f"Time: {timestamp}", (10, 30),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             video.write(img)
 
         video.release()
@@ -257,8 +266,14 @@ class Main():
 
     def show_real_time_video(self):
         with Camera() as cam:
-            cam.Width = self.frame
-            cam.Height = self.frame
+            cam.Width = self.frame[0]
+            cam.Height = self.frame[1]
+
+            print(
+                f"SensorWidth: {cam.SensorWidth}, SensorHeight: {cam.SensorHeight}")
+
+            cam.OffsetX = (cam.SensorWidth - cam.Width) // 2
+            cam.OffsetY = (cam.SensorHeight - cam.Height) // 2
 
             cam.AcquisitionFrameRateAuto = 'Off'
             cam.AcquisitionFrameRateEnabled = True
@@ -283,6 +298,9 @@ class Main():
     def run(self):
         self.show_real_time_video()
 
+        os.makedirs(
+            f'storage/{self.current_time} {name} {exposure_time} {fps} {self.frame}', exist_ok=True)
+
         thread1 = threading.Thread(
             target=self.save_video_by_pyspin, name='video')
         thread2 = threading.Thread(target=self.save_serial, name='serial')
@@ -296,14 +314,88 @@ class Main():
         if self.stop:
             self.convert_frames_to_video()
 
+        return self.video_path, self.serial_path
+
+
+def calculate_exposure_time(new_fps: int = 88):
+    return 6000 * (88/new_fps)
+
 
 if __name__ == '__main__':
-    exposure_time = 2000
+    """
+        w x h   -> fps
+        > 500   -> 30 FPS
+        500x500 -> 48 FPS
+        400x400 -> 58 FPS
+        300x300 -> 70 FPS
+        200x200 -> 88 FPS
+        148x148 -> 100 FPS
+        100x100 -> 122 FPS
+        50x50   -> 148 FPS
 
-    main = Main(exposure_time)
-    main.run()
+        best: 200x200 -> 88 FPS
+                size_ppg = 200  # W x H
+                size_spg = 100  # W x H
+                exposure_time = 6000  # us
+    """
+
+    port = "COM4"
+    import serial.tools.list_ports
+
+    def get_available_ports():
+        ports = serial.tools.list_ports.comports()
+        return [port.device for port in ports]
+
+    available_ports = get_available_ports()
+    print("Available ports:", available_ports)
+
+    if available_ports:
+        port = available_ports[0]  # Select the first available port
+    else:
+        raise Exception("No available ports found")
+
+    # * 400x400 -> 58 FPS
+    # exposure_time = 6000  # us
+    # size_ppg = 200  # W x H
+    # size_spg = 100  # W x H
+    # fps = 58  # Hz
+    # cache = False
+
+    # * 200x200 -> 88 FPS
+    # exposure_time = 6000  # us
+    # size_ppg = 200  # W x H
+    # size_spg = 100  # W x H
+    # fps = 88  # Hz
+    # cache = False
+
+    # * 148x148 -> 100 FPS
+    # exposure_time = 6000  # us
+    # size_ppg = 148  # W x H
+    # size_spg = 100  # W x H
+    # fps = 100  # Hz
+
+    # * CM3-U3-31S4M-CS 200x200 -> 350 FPS
+    size_cam = (200, 200)  # W x H
+    size_ppg = 200  # W x H
+    size_spg = 100  # W x H
+    fps = 88  # Hz
+    exposure_time = 3500
+    # calculate_exposure_time(fps)
+    cache = False
+
+    length = 20  # second
+
+    print(f"Exposure Time: {exposure_time} us")
+
+    name = input("Enter your name: ")
+    main = Main(port, exposure_time, name, fps, size_cam, length)
+    video_path, serial_path = main.run()
+
+    print(f'path: "{video_path}", "{serial_path}"')
+
+    # video_path, serial_path = "storage/video_15_36_tee_18000.avi", "storage/serial_15_36_tee_18000.xlsx"
 
     analysis = Analysis_PPG_SPG(
-        "./video.avi", "./serial.xlsx", 150, exposure_time)
-    a, b, c = analysis.main()
+        video_path, serial_path, size_ppg, size_spg, exposure_time, fps)
+    ppg, spg, excel = analysis.main()
     plt.show()

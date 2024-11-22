@@ -1,0 +1,7 @@
+frames/
+temp/
+serial.xlsx
+video.avi
+__pycache__/
+.vscode/
+storage
