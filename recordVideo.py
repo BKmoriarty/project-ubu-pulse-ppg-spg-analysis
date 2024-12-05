@@ -1,6 +1,6 @@
 from datetime import datetime
 import PySpin
-import matplotlib.pyplot as plt
+import cv2
 import keyboard
 
 class AviType:
@@ -9,8 +9,8 @@ class AviType:
     MJPG = 1
     H264 = 2
 
-class Record_video():
-    def __init__(self,fps=30,exposure_time=6000,width = 200,height = 200,filename="VIDEO",time_record=20) -> None:
+class RecordVideo():
+    def __init__(self,fps=30,exposure_time=1000,width = 200,height = 200,filename="VIDEO",time_record=20) -> None:
         self.fps = fps
         self.exposure_time = exposure_time
         self.width = width
@@ -19,7 +19,7 @@ class Record_video():
         self.filename = filename
 
         self.time_record = time_record
-        self.frame_images = self.fps * self.time_record
+        self.frame_images = fps * time_record
 
         self.continue_recording = True
         self.stop = False
@@ -131,128 +131,104 @@ class Record_video():
 
         return result
 
-    def configure_custom_image_settings(self, nodemap):
+    def configure_custom_image_settings(self,cam):
         """
-        Configures a number of settings on the camera including offsets  X and Y, width,
-        height, and pixel format. These settings must be applied before BeginAcquisition()
-        is called; otherwise, they will be read only. Also, it is important to note that
-        settings are applied immediately. This means if you plan to reduce the width and
-        move the x offset accordingly, you need to apply such changes in the appropriate order.
-
-        :param nodemap: GenICam nodemap.
-        :type nodemap: INodeMap
-        :return: True if successful, False otherwise.
-        :rtype: bool
+        Configures a number of settings on the camera including offsets X and Y,
+        width, height, and pixel format. These settings must be applied before
+        BeginAcquisition() is called; otherwise, those nodes would be read only.
         """
-        print('\n*** CONFIGURING CUSTOM IMAGE SETTINGS *** \n')
+        print('\n*** CONFIGURING CUSTOM IMAGE SETTINGS ***\n')
 
         try:
             result = True
 
+            # Set acquisition mode to continuous
+            if cam.AcquisitionMode.GetAccessMode() == PySpin.RW:
+                cam.AcquisitionMode.SetValue(PySpin.AcquisitionMode_Continuous)
+                print('Acquisition mode set to continuous...')
+
+            # Configure Frame Rate using QuickSpin API
+            if cam.AcquisitionFrameRateEnable is not None:
+                if cam.AcquisitionFrameRateEnable.GetAccessMode() == PySpin.RW:
+                    # Enable frame rate control
+                    cam.AcquisitionFrameRateEnable.SetValue(True)
+
+                    # Set frame rate directly if available
+                    if hasattr(cam, 'AcquisitionFrameRate') and cam.AcquisitionFrameRate.GetAccessMode() == PySpin.RW:
+                        # Get limits
+                        min_frame_rate = cam.AcquisitionFrameRate.GetMin()
+                        max_frame_rate = cam.AcquisitionFrameRate.GetMax()
+                        print(f'Frame rate range: {min_frame_rate} to {max_frame_rate} fps')
+                        
+                        # Set frame rate (make sure it's within range)
+                        frame_rate = min(max_frame_rate, float(self.fps))
+                        cam.AcquisitionFrameRate.SetValue(frame_rate)
+                        print(f'Frame rate set to: {frame_rate} fps')
+                        
+                        # Verify the frame rate was set
+                        actual_frame_rate = cam.AcquisitionFrameRate.GetValue()
+                        print(f'Actual frame rate: {actual_frame_rate} fps')
+            else:
+                print('Frame rate control not available for this camera model')
+
             # Apply mono 8 pixel format
-            #
-            # *** NOTES ***
-            # Enumeration nodes are slightly more complicated to set than other
-            # nodes. This is because setting an enumeration node requires working
-            # with two nodes instead of the usual one.
-            #
-            # As such, there are a number of steps to setting an enumeration node:
-            # retrieve the enumeration node from the nodemap, retrieve the desired
-            # entry node from the enumeration node, retrieve the integer value from
-            # the entry node, and set the new value of the enumeration node with
-            # the integer value from the entry node.
-            #
-            # Retrieve the enumeration node from the nodemap
-            node_pixel_format = PySpin.CEnumerationPtr(nodemap.GetNode('PixelFormat'))
-            if PySpin.IsReadable(node_pixel_format) and PySpin.IsWritable(node_pixel_format):
-
-                # Retrieve the desired entry node from the enumeration node
-                node_pixel_format_mono8 = PySpin.CEnumEntryPtr(node_pixel_format.GetEntryByName('Mono8'))
-                if PySpin.IsReadable(node_pixel_format_mono8):
-
-                    # Retrieve the integer value from the entry node
-                    pixel_format_mono8 = node_pixel_format_mono8.GetValue()
-
-                    # Set integer as new value for enumeration node
-                    node_pixel_format.SetIntValue(pixel_format_mono8)
-
-                    print('Pixel format set to %s...' % node_pixel_format.GetCurrentEntry().GetSymbolic())
-
-                else:
-                    print('Pixel format mono 8 not readable...')
-
+            if cam.PixelFormat.GetAccessMode() == PySpin.RW:
+                cam.PixelFormat.SetValue(PySpin.PixelFormat_Mono8)
+                print('Pixel format set to %s...' % cam.PixelFormat.GetCurrentEntry().GetSymbolic())
             else:
-                print('Pixel format not readable or writable...')
-                
-            # Set maximum width
-            #
-            # *** NOTES ***
-            # Other nodes, such as those corresponding to image width and height,
-            # might have an increment other than 1. In these cases, it can be
-            # important to check that the desired value is a multiple of the
-            # increment. However, as these values are being set to the maximum,
-            # there is no reason to check against the increment.
-            node_width = PySpin.CIntegerPtr(nodemap.GetNode('Width'))
-            if PySpin.IsReadable(node_width) and PySpin.IsWritable(node_width):
-                width_max = node_width.GetMax()
+                print('Pixel format not available...')
+                result = False
 
+
+            # Get the camera's actual sensor dimensions
+            nodemap = cam.GetNodeMap()
+            sensor_width = PySpin.CIntegerPtr(nodemap.GetNode('SensorWidth'))
+            sensor_height = PySpin.CIntegerPtr(nodemap.GetNode('SensorHeight'))
+
+            if not PySpin.IsReadable(sensor_width) or not PySpin.IsReadable(sensor_height):
+                print('Unable to read sensor dimensions. Using Width/Height max values instead.')
+                max_width = cam.Width.GetMax()
+                max_height = cam.Height.GetMax()
             else:
-                print('Width not readable or writable...')
+                max_width = sensor_width.GetValue()
+                max_height = sensor_height.GetValue()
+                print('Sensor dimensions: %dx%d' % (max_width, max_height))
 
-            # Set maximum height
-            #
-            # *** NOTES ***
-            # A maximum is retrieved with the method GetMax(). A node's minimum and
-            # maximum should always be a multiple of its increment.
-            node_height = PySpin.CIntegerPtr(nodemap.GetNode('Height'))
-            if  PySpin.IsReadable(node_height) and PySpin.IsWritable(node_height):
-
-                height_max = node_height.GetMax()
-
+            # Set width to width configured
+            if cam.Width.GetAccessMode() == PySpin.RW and cam.Width.GetInc() != 0:
+                # Calculate center offset for X
+                center_offset_x = (max_width - self.width) // 2
+                # Set width first
+                cam.Width.SetValue(self.width)
+                print('Width set to %i...' % cam.Width.GetValue())
+                # Then set X offset to center
+                if cam.OffsetX.GetAccessMode() == PySpin.RW:
+                    cam.OffsetX.SetValue(center_offset_x)
+                    print('Offset X set to %d...' % cam.OffsetX.GetValue())
             else:
-                print('Height not readable or writable...')
+                print('Width not available...')
+                result = False
 
-            # Apply minimum to offset X
-            #
-            # *** NOTES ***
-            # Numeric nodes have both a minimum and maximum. A minimum is retrieved
-            # with the method GetMin(). Sometimes it can be important to check
-            # minimums to ensure that your desired value is within range.
-            node_offset_x = PySpin.CIntegerPtr(nodemap.GetNode('OffsetX'))
-            if PySpin.IsReadable(node_offset_x) and PySpin.IsWritable(node_offset_x):
-                off_x_to_set = (width_max - self.width) // 2
-                node_offset_x.SetValue(off_x_to_set)
-                print('Offset X set to %i...' % off_x_to_set)
-
+            # Set height to height configured
+            if cam.Height.GetAccessMode() == PySpin.RW and cam.Height.GetInc() != 0:
+                # Calculate center offset for Y
+                center_offset_y = (max_height - self.height) // 2
+                # Set height first
+                cam.Height.SetValue(self.height)
+                print('Height set to %i...' % cam.Height.GetValue())
+                # Then set Y offset to center
+                if cam.OffsetY.GetAccessMode() == PySpin.RW:
+                    cam.OffsetY.SetValue(center_offset_y)
+                    print('Offset Y set to %d...' % cam.OffsetY.GetValue())
             else:
-                print('Offset X not readable or writable...')
-
-            # Apply minimum to offset Y
-            #
-            # *** NOTES ***
-            # It is often desirable to check the increment as well. The increment
-            # is a number of which a desired value must be a multiple of. Certain
-            # nodes, such as those corresponding to offsets X and Y, have an
-            # increment of 1, which basically means that any value within range
-            # is appropriate. The increment is retrieved with the method GetInc().
-            node_offset_y = PySpin.CIntegerPtr(nodemap.GetNode('OffsetY'))
-            if PySpin.IsReadable(node_offset_y) and PySpin.IsWritable(node_offset_y):
-                
-                off_y_to_set = (height_max - self.height) // 2
-                node_offset_y.SetValue(off_y_to_set)
-                print('Offset Y set to %i...' % off_y_to_set)
-
-            else:
-                print('Offset Y not readable or writable...')
-
+                print('Height not available...')
+                result = False
 
         except PySpin.SpinnakerException as ex:
             print('Error: %s' % ex)
             return False
 
         return result
-
-
 
     def print_device_info(self, nodemap):
         """
@@ -304,6 +280,10 @@ class Record_video():
         :rtype: bool
         """
         print('*** IMAGE ACQUISITION ***\n')
+        
+        # Retrieve, convert, and save images
+        images = list()
+            
         try:
             result = True
 
@@ -355,6 +335,42 @@ class Record_video():
             else:
                 print('\tUnable to set height; height for sequencer not available on all camera models...')
 
+            ### Disable FrameRateAuto ###
+            node_frame_rate_auto = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionFrameRateAuto"))
+            if not PySpin.IsAvailable(node_frame_rate_auto) or not PySpin.IsWritable(node_frame_rate_auto):
+                print('Unable to turn off Frame Rate Auto (enum retrieval). Aborting...')
+                return False
+            
+            node_frame_rate_auto_off = node_frame_rate_auto.GetEntryByName("Off")
+            if not PySpin.IsAvailable(node_frame_rate_auto_off) or not PySpin.IsReadable(node_frame_rate_auto_off):
+                print ('Unable to set Frame Rate Auto to Off (entry retrieval). Aborting...')
+                return False
+            
+            frame_rate_auto_off = node_frame_rate_auto_off.GetValue()
+            
+            node_frame_rate_auto.SetIntValue(frame_rate_auto_off)
+            
+            print ('Frame Rate Auto set to Off...')
+            
+            ### Enable AcquisitionFrameRateControlEnable ###
+            node_acquisition_frame_rate_control_enable = PySpin.CBooleanPtr(nodemap.GetNode("AcquisitionFrameRateEnabled"))
+            if not PySpin.IsAvailable(node_acquisition_frame_rate_control_enable) or not PySpin.IsWritable(node_acquisition_frame_rate_control_enable):
+                print ('Unable to turn on Acquisition Frame Rate Control Enable (bool retrieval). Aborting...')
+                return False
+            
+            node_acquisition_frame_rate_control_enable.SetValue(True)
+            
+            print ('Acquisiton Frame Rate Control Enabled...')
+            
+            ### Set AcquisitionFrameRate to 10 FPS ###
+            if cam.AcquisitionFrameRate.GetAccessMode() != PySpin.RW:
+                print ('Unable to set Frame Rate. Aborting...')
+                return False
+            
+            cam.AcquisitionFrameRate.SetValue(self.fps)
+            
+            print ('Acquisiton Frame Rate set to %s FPS...' % self.fps) 
+
             # Set exposure time; exposure time recorded in microseconds
             node_exposure_time = PySpin.CFloatPtr(nodemap.GetNode('ExposureTime'))
             if not PySpin.IsReadable(node_exposure_time) or not PySpin.IsWritable(node_exposure_time):
@@ -375,8 +391,7 @@ class Record_video():
 
             print('Acquiring images...')
 
-            # Retrieve, convert, and save images
-            images = list()
+            
 
             # Create ImageProcessor instance for post processing images
             processor = PySpin.ImageProcessor()
@@ -502,6 +517,42 @@ class Record_video():
 
             print('Acquisition mode set to continuous...')
 
+            ### Disable FrameRateAuto ###
+            node_frame_rate_auto = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionFrameRateAuto"))
+            if not PySpin.IsAvailable(node_frame_rate_auto) or not PySpin.IsWritable(node_frame_rate_auto):
+                print('Unable to turn off Frame Rate Auto (enum retrieval). Aborting...')
+                return False
+            
+            node_frame_rate_auto_off = node_frame_rate_auto.GetEntryByName("Off")
+            if not PySpin.IsAvailable(node_frame_rate_auto_off) or not PySpin.IsReadable(node_frame_rate_auto_off):
+                print ('Unable to set Frame Rate Auto to Off (entry retrieval). Aborting...')
+                return False
+            
+            frame_rate_auto_off = node_frame_rate_auto_off.GetValue()
+            
+            node_frame_rate_auto.SetIntValue(frame_rate_auto_off)
+            
+            print ('Frame Rate Auto set to Off...')
+            
+            ### Enable AcquisitionFrameRateControlEnable ###
+            node_acquisition_frame_rate_control_enable = PySpin.CBooleanPtr(nodemap.GetNode("AcquisitionFrameRateEnabled"))
+            if not PySpin.IsAvailable(node_acquisition_frame_rate_control_enable) or not PySpin.IsWritable(node_acquisition_frame_rate_control_enable):
+                print ('Unable to turn on Acquisition Frame Rate Control Enable (bool retrieval). Aborting...')
+                return False
+            
+            node_acquisition_frame_rate_control_enable.SetValue(True)
+            
+            print ('Acquisiton Frame Rate Control Enabled...')
+            
+            ### Set AcquisitionFrameRate to 10 FPS ###
+            if cam.AcquisitionFrameRate.GetAccessMode() != PySpin.RW:
+                print ('Unable to set Frame Rate. Aborting...')
+                return False
+            
+            cam.AcquisitionFrameRate.SetValue(self.fps)
+            
+            print ('Acquisiton Frame Rate set to %s FPS...' % self.fps) 
+
             #  Begin acquiring images
             #
             #  *** NOTES ***
@@ -531,12 +582,6 @@ class Record_video():
             # Close program
             print('Press enter to close the program..')
 
-            # Figure(1) is default so you can omit this line. Figure(0) will create a new window every time program hits this line
-            fig = plt.figure(1)
-
-            # Close the GUI when close event happens
-            fig.canvas.mpl_connect('close_event', self.handle_close)
-
             # Retrieve and display images
             while(self.continue_recording):
                 try:
@@ -558,27 +603,23 @@ class Record_video():
                     if image_result.IsIncomplete():
                         print('Image incomplete with image status %d ...' % image_result.GetImageStatus())
 
-                    else:                    
-
+                    else:
                         # Getting the image data as a numpy array
                         image_data = image_result.GetNDArray()
 
-                        # Draws an image on the current figure
-                        plt.imshow(image_data, cmap='gray')
-
-                        # Interval in plt.pause(interval) determines how fast the images are displayed in a GUI
-                        # Interval is in seconds.
-                        plt.pause(0.001)
-
-                        # Clear current reference of a figure. This will improve display speed significantly
-                        plt.clf()
+                        # Display the image using OpenCV
+                        cv2.imshow('Camera Feed', image_data)
                         
-                        # If user presses enter, close the program
-                        if keyboard.is_pressed('ENTER'):
+                        # Break the loop if 'q' is pressed
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            break
+
+                        # Break the loop if 'Enter' is pressed
+                        if keyboard.is_pressed('enter'):
                             print('Program is closing...')
                             
                             # Close figure
-                            plt.close('all')             
+                            cv2.destroyAllWindows()             
                             # input('Done! Press Enter to exit...')
                             self.continue_recording=False                        
 
@@ -594,6 +635,8 @@ class Record_video():
                     print('Error: %s' % ex)
                     return False
 
+            # Clean up
+            cv2.destroyAllWindows()
             #  End acquisition
             #
             #  *** NOTES ***
@@ -750,6 +793,10 @@ class Record_video():
             # Retrieve GenICam nodemap
             nodemap = cam.GetNodeMap()
             
+            # Configure image settings
+            if not self.configure_custom_image_settings(cam):
+                return False
+
             # Configure exposure
             if not self.configure_exposure(cam):
                 return False
@@ -782,6 +829,10 @@ class Record_video():
             # Retrieve GenICam nodemap
             nodemap = cam.GetNodeMap()
             
+             # Configure image settings
+            if not self.configure_custom_image_settings(cam):
+                return False
+
             # Configure exposure
             if not self.configure_exposure(cam):
                 return False
@@ -801,6 +852,10 @@ class Record_video():
     def display_images(self):
         
         result = True
+        
+        if self.cam_list == None:
+            print('Not enough cameras!')
+            return False
 
         for i, cam in enumerate(self.cam_list):
 
@@ -822,6 +877,10 @@ class Record_video():
     def start(self) -> bool:
 
         result = True
+        
+        if self.cam_list == None:
+            print('Not enough cameras!')
+            return False
 
         for i, cam in enumerate(self.cam_list):
 
@@ -830,19 +889,19 @@ class Record_video():
             result &= self.run_single_camera(cam)
             print('Camera %d example complete... \n' % i)
         
-        del cam
+        # del cam
 
-        # Clear camera list before releasing system
-        self.cam_list.Clear()
+        # # Clear camera list before releasing system
+        # self.cam_list.Clear()
 
-        # Release instance
-        self.system.ReleaseInstance()
+        # # Release instance
+        # self.system.ReleaseInstance()
         
         return result
 
 if __name__ == '__main__':
-    record = Record_video()
+    record = RecordVideo()
     record.init_camera()
-    input("Tap show...")
+    # input("Tap show...")
     record.display_images()
-    # record.start()
+    record.start()
