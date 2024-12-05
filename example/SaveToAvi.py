@@ -213,6 +213,10 @@ def acquire_images(cam, nodemap):
     :rtype: bool
     """
     print('*** IMAGE ACQUISITION ***\n')
+    
+     # Retrieve, convert, and save images
+    images = list()
+        
     try:
         result = True
 
@@ -239,8 +243,7 @@ def acquire_images(cam, nodemap):
 
         print('Acquiring images...')
 
-        # Retrieve, convert, and save images
-        images = list()
+       
 
         # Create ImageProcessor instance for post processing images
         processor = PySpin.ImageProcessor()
@@ -366,6 +369,7 @@ def main():
         input('Done! Press Enter to exit...')
         return False
 
+    cam = cam_list.GetByIndex(0)
     # Run example on each camera
     for i, cam in enumerate(cam_list):
 
