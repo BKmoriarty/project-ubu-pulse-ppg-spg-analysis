@@ -378,8 +378,8 @@ if __name__ == '__main__':
     size_cam = (200, 200)  # W x H
     size_ppg = 200  # W x H
     size_spg = 100  # W x H
-    fps = 88  # Hz
-    exposure_time = 3500
+    fps = 122  # Hz
+    exposure_time = 6000
     # calculate_exposure_time(fps)
     cache = False
 
@@ -393,9 +393,16 @@ if __name__ == '__main__':
 
     print(f'path: "{video_path}", "{serial_path}"')
 
-    # video_path, serial_path = "storage/video_15_36_tee_18000.avi", "storage/serial_15_36_tee_18000.xlsx"
-
     analysis = Analysis_PPG_SPG(
         video_path, serial_path, size_ppg, size_spg, exposure_time, fps)
     ppg, spg, excel = analysis.main()
     plt.show()
+
+    # input feedback
+    feedback_rate = input("Enter feedback rate 1-10: ")
+    feedback = input("Enter feedback: ")
+
+    # rename folder
+    folder_name = f"storage/{main.current_time} {name} {exposure_time} {fps} {size_cam} rate-{feedback_rate} {feedback}"
+    os.rename(
+        f"storage/{main.current_time} {name} {exposure_time} {fps} {size_cam}", folder_name)

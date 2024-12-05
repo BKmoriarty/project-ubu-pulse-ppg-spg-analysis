@@ -87,7 +87,7 @@ class Analysis_PPG_SPG:
         self.video_path = video_path
         self.dir_path = video_path.split('/')[1]
         self.excel_path = excel_path
-        self.size_block = 3
+        self.size_block = 5
         self.exposure_time = exposure_time
         self.fps = fps
         self.cache = cache
@@ -277,22 +277,22 @@ class Analysis_PPG_SPG:
 
             # video.write(frame)
 
-            # if (i == 0):
-            # fig, ax01 = plt.subplots(1, 1)
-            # ax01.imshow(frame[y1_ppg:y2_ppg, x1_ppg:x2_ppg])
+            if (i == 0):
+                fig, ax01 = plt.subplots(1, 1)
+                ax01.imshow(frame[y1_ppg:y2_ppg, x1_ppg:x2_ppg])
 
-            # fig, ax02 = plt.subplots(1, 1)
-            # ax02.imshow(roi_ppg, cmap='hot', )
+                fig, ax02 = plt.subplots(1, 1)
+                ax02.imshow(roi_ppg, cmap='hot', )
 
-            # fig, ax03 = plt.subplots(1, 1)
-            # ax03.imshow(signal_intensity * np.ones(
-            #     (roi_ppg.shape[0], roi_ppg.shape[1])), cmap='hot')
+                fig, ax03 = plt.subplots(1, 1)
+                ax03.imshow(signal_intensity * np.ones(
+                    (roi_ppg.shape[0], roi_ppg.shape[1])), cmap='hot')
 
-            # fig, ax04 = plt.subplots(1, 1)
-            # ax04.imshow(contrast, cmap='hot', )
+                fig, ax04 = plt.subplots(1, 1)
+                ax04.imshow(contrast, cmap='hot', )
 
-            # fig, ax05 = plt.subplots(1, 1)
-            # ax05.imshow(exposure, cmap='hot', )
+                fig, ax05 = plt.subplots(1, 1)
+                ax05.imshow(exposure, cmap='hot', )
 
             end_process = process_time()
             i = i+1
@@ -319,7 +319,7 @@ class Analysis_PPG_SPG:
         plt.title('Extracted Heart Wave Signal')
         plt.xlabel('Frame')
         plt.ylabel('Intensity')
-        plt.legend()
+        # plt.legend()
         plt.show()
 
     def plot_spectrum(self, xf, yf):
@@ -328,7 +328,7 @@ class Analysis_PPG_SPG:
         plt.title('Frequency Spectrum of the Extracted Signal')
         plt.xlabel('Frequency (Hz)')
         plt.ylabel('Amplitude')
-        plt.legend()
+        # plt.legend()
         plt.show()
 
     def bandpass_filter(self, signal, lowcut, highcut, fs, order=3):
@@ -384,7 +384,7 @@ class Analysis_PPG_SPG:
         plt.title(title)
         plt.xlabel('Frame')
         plt.ylabel('Intensity')
-        plt.legend()
+        # plt.legend()
         plt.show()
 
     # Plot the frequency spectrum (frequency domain)
@@ -395,7 +395,7 @@ class Analysis_PPG_SPG:
         plt.title(title)
         plt.xlabel('Frequency (Hz)')
         plt.ylabel('Amplitude')
-        plt.legend()
+        # plt.legend()
         plt.show()
 
     def load_excel(self, file_name_excel):
@@ -479,14 +479,16 @@ class Analysis_PPG_SPG:
         power_ppg_mean = power_ppg/power_ppg_count
         power_noise_ppg_mean = power_noise_ppg/power_noise_ppg_count
 
-        SNR_ppg = 10*np.log(power_ppg_mean/power_noise_ppg_mean)
+        SNR_ppg = 10*np.log(power_ppg_mean/power_noise_ppg_mean)  # unit is dB
 
         return SNR_ppg
 
     def find_peak_freq(self, data, time):
 
+        distance = self.fps * (50/88)
+
         peaks, _ = find_peaks(data, height=None,
-                              threshold=None, distance=50)
+                              threshold=None, distance=distance)
 
         # Calculate heart rate (if peaks represent heartbeats)
         time_diff = np.diff(time[peaks])
@@ -502,10 +504,11 @@ class Analysis_PPG_SPG:
         return i_max_peak
 
     def find_peak_freq_excel(self, data, time):
+        distance = self.fps * (60/88)
         # Find peaks
         # Adjust these parameters as needed for your specific data
         peaks, _ = find_peaks(data, height=None,
-                              threshold=None, distance=60)
+                              threshold=None, distance=distance)
 
         # Calculate heart rate (if peaks represent heartbeats)
         time_diff = np.diff(time[peaks])
@@ -574,7 +577,7 @@ class Analysis_PPG_SPG:
         fig, (ax4, ax5, ax6) = plt.subplots(3, 1, figsize=(11, 5))
 
         ax4.plot(time_ppg, signal_ppg, color='b', label='iPPG Raw Signal')
-        ax4.legend()
+        # ax4.legend()
         ax4.set_xlabel('Time (s)')
         ax4.set_ylabel('Amplitude')
 
@@ -587,7 +590,7 @@ class Analysis_PPG_SPG:
         ax5.set_ylim([0, np.max(filtered_signal_fft1[1]) * 2])
         ax5.plot(filtered_signal_fft1[0][max_filtered_ppg], filtered_signal_fft1[1][max_filtered_ppg],
                  color='r', label="Peaks iPPG Filtered FFT", marker='o', linestyle='')
-        ax5.legend()
+        # ax5.legend()
         ax5.set_xlabel('Time (s)')
         ax5.set_ylabel('Amplitude')
 
@@ -595,7 +598,7 @@ class Analysis_PPG_SPG:
                  label='iPPG Filtered Signal')
         ax6.plot(time_ppg[peaks_filtered_signal], filtered_ppg[peaks_filtered_signal],
                  color='r', label="Peaks iPPG", marker='o', linestyle='')
-        ax6.legend()
+        # ax6.legend()
         ax6.set_xlabel('Time (s)')
         ax6.set_ylabel('Amplitude')
 
@@ -628,7 +631,7 @@ class Analysis_PPG_SPG:
 
         ax1.plot(time_spg, mean_exposure_frame,
                  color='b', label='SPG Raw Signal')
-        ax1.legend()
+        # ax1.legend()
         ax1.set_xlabel('Time (s)')
         ax1.set_ylabel('Amplitude')
 
@@ -641,7 +644,7 @@ class Analysis_PPG_SPG:
             signal_freq_range_spg[0], signal_freq_range_spg[1], color='green', alpha=0.3)
         ax2.plot(filtered_spg_fft[0][max_filtered_spg], filtered_spg_fft[1][max_filtered_spg],
                  color='r', label="Peaks SPG Filtered FFT", marker='o', linestyle='')
-        ax2.legend()
+        # ax2.legend()
         ax2.set_xlabel('Time (s)')
         ax2.set_ylabel('Amplitude')
 
@@ -649,7 +652,7 @@ class Analysis_PPG_SPG:
                  label='SPG Filtered Signal')
         ax3.plot(time_spg[peaks_filtered_spg], filtered_spg[peaks_filtered_spg],
                  color='r', label="Peaks SPG", marker='o', linestyle='')
-        ax3.legend()
+        # ax3.legend()
         ax3.set_xlabel('Time (s)')
         ax3.set_ylabel('Amplitude')
 
@@ -686,7 +689,7 @@ class Analysis_PPG_SPG:
 
         ax10.plot(excel_data[0], excel_data[1],
                   color='b', label='cPPG Signal')
-        ax10.legend()
+        # ax10.legend()
         ax10.set_xlabel('Time (s)')
         ax10.set_ylabel('Amplitude')
 
@@ -697,7 +700,7 @@ class Analysis_PPG_SPG:
             signal_freq_range_excel[0], signal_freq_range_excel[1], color='green', alpha=0.3)
         ax11.plot(filtered_excel_fft[0][max_filtered_excel], filtered_excel_fft[1][max_filtered_excel],
                   color='r', label="Peaks cPPG Filtered FFT", marker='o', linestyle='')
-        ax11.legend()
+        # ax11.legend()
         ax11.set_xlabel('Time (s)')
         ax11.set_ylabel('Amplitude')
 
@@ -705,7 +708,7 @@ class Analysis_PPG_SPG:
                   label='cPPG Filtered Signal')
         ax12.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
                   color='r', label="Peaks cPPG", marker='o', linestyle='')
-        ax12.legend()
+        # ax12.legend()
         ax12.set_xlabel('Time (s)')
         ax12.set_ylabel('Amplitude')
 
@@ -775,7 +778,8 @@ class Analysis_PPG_SPG:
 
             # Only keep delays within the threshold
             if abs(delay) <= delay_threshold:
-                peak_delays.append(np.abs(delay))
+                # peak_delays.append(np.abs(delay))
+                peak_delays.append(delay)
                 # peak_delays.append(delay)
                 valid_spg_peaks.append(peaks_filtered_spg[i])
                 valid_ppg_peaks.append(peaks_filtered_signal[j])
@@ -837,7 +841,7 @@ class Analysis_PPG_SPG:
                       [1, 1], f'{color}-', alpha=0.5)
 
         ax13.grid()
-        # ax13.legend()
+        ax13.legend()
         ax13.set_title('Time Delay Between PPG and SPG Peaks')
         ax13.set_xlabel('Time (s)')
         ax13.set_ylabel('Normalized Amplitude')
@@ -847,8 +851,9 @@ class Analysis_PPG_SPG:
         for idx, delay in enumerate(peak_delays):
             color = colors[idx % len(colors)]
             ax14.plot(idx, delay, "o-", color=color)
-        ax14.axhline(y=avg_time_delay, color='gray', linestyle='--',
-                     label=f'Average Delay: {avg_time_delay:.4f} s')
+        # ax14.axhline(y=avg_time_delay, color='gray', linestyle='--',
+        #              label=f'Average Delay: {avg_time_delay:.4f} s')
+        ax14.set_ylim([-0.2, 0.2])
         ax14.set_xlabel('Peak Pair Index')
         ax14.set_ylabel('Time Delay (s)')
         ax14.set_title('Time Delays Between Corresponding Peaks')
@@ -889,14 +894,23 @@ class Analysis_PPG_SPG:
         ax7.set_xlabel('Time (s)')
         ax7.set_ylabel('Amplitude')
 
-        ax8.plot(time_plot, filtered_ppg/np.max(filtered_ppg),
+        offset_ppg = np.mean((filtered_ppg/np.max(filtered_ppg))
+                             [peaks_filtered_signal])
+
+        offset_excel = np.mean((filtered_excel/np.max(filtered_excel))
+                               [peaks_filtered_excel])
+
+        offset_ppg_excel = 1 + np.abs(offset_ppg - offset_excel)
+
+        ax8.plot(time_plot, (filtered_ppg/np.max(filtered_ppg)) * offset_ppg_excel,
                  color='b', label='iPPG Signal')
-        ax8.plot(time_plot[peaks_filtered_signal], (filtered_ppg/np.max(filtered_ppg))[peaks_filtered_signal],
+        ax8.plot(time_plot[peaks_filtered_signal], (filtered_ppg/np.max(filtered_ppg))[peaks_filtered_signal] * offset_ppg_excel,
                  color='b', label='Peaks iPPG', marker='o', linestyle='')
         ax8.plot(excel_data[0], filtered_excel/np.max(filtered_excel),
                  color='r', label='cPPG Signal', linestyle='--')
         ax8.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
                  color='r', label='Peaks cPPG', marker='o', linestyle='')
+
         ax8.grid()
         ax8.legend()
         ax8.set_title('Integrate iPPG Signal')
@@ -925,7 +939,7 @@ class Analysis_PPG_SPG:
         fig.tight_layout()
         fig.savefig(f'storage/{self.dir_path}/integrate_signal.png')
 
-        # plt.show()
+        plt.show()
 
         return filtered_ppg, filtered_spg, filtered_excel
 
@@ -934,16 +948,10 @@ if __name__ == "__main__":
 
     exposure_time = 6000  # us
     size_ppg = 200  # W x H 200
-    size_spg = 80  # W x H 100
+    size_spg = 150  # W x H 100
     fps = 88  # Hz 88
-    cache = True
-    cut_time_delay = 0.1
-
-    # exposure_time = 6000  # us
-    # size_ppg = 148  # W x H
-    # size_spg = 100  # W x H
-    # fps = 100  # Hz
-    # length = 20  # second
+    cache = False
+    cut_time_delay = 0.2
 
     folder = "2024-11-14 15_26_51 tee 6000 88 200"
     video_path = f"storage/{folder}/video.avi"
