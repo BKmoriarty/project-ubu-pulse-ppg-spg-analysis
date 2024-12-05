@@ -1,3 +1,6 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+
 import cv2
 from matplotlib.widgets import MultiCursor
 import numpy as np
@@ -146,13 +149,6 @@ class Analysis_PPG_SPG:
         return (x1, y1, x2, y2)
 
     def cal_contrast(self, frame):
-        
-        # Check GPU availability
-        print(f"CUDA Available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"GPU Device: {torch.cuda.get_device_name(0)}")
-            return self.cal_contrast_gpu(frame)
-
         # Calculate the contrast of the frame
         shape = frame.shape
 
@@ -244,6 +240,13 @@ class Analysis_PPG_SPG:
 
         length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) + 1
         i = 0
+        
+        use_GPU = False
+        # Check GPU availability
+        print(f"CUDA Available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"GPU Device: {torch.cuda.get_device_name(0)}")
+            use_GPU = True
 
         self.printProgressBar(0, length, prefix='Progress:',
                               suffix='Complete', length=50)
@@ -251,7 +254,7 @@ class Analysis_PPG_SPG:
 
         # video = cv2.VideoWriter(
         #     "roi.avi", cv2.VideoWriter_fourcc(*'XVID'), self.fps, (self.size_ppg, self.size_ppg))
-
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -268,9 +271,8 @@ class Analysis_PPG_SPG:
             # Calculate the mean pixel intensity in the ROI
             signal_intensity = np.mean(roi_ppg)
             signal_ppg.append(signal_intensity)
-
-            contrast = self.cal_contrast(roi_spg)
-            # contrast = self.cal_contrast_gpu(roi_spg)
+                
+            contrast = self.cal_contrast_gpu(roi_spg) if use_GPU else self.cal_contrast(roi_spg)
             mean_contrast_frame.append(np.mean(contrast))  # mean contrast
 
             # Calculate mean exposure using the formula: 1 / (2 * T * K^2)
@@ -920,7 +922,7 @@ if __name__ == "__main__":
     cache = False
     cut_time_delay = 0.2
 
-    folder = "2024-11-14 15_26_51 tee 6000 88 200"
+    folder = "2024-11-27 14_00_24 tee 6000 88 (200, 200)"
     video_path = f"storage/{folder}/video.avi"
     serial_path = f"storage/{folder}/serial.xlsx"
 
