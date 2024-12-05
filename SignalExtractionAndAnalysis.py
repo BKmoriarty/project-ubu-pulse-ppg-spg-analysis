@@ -146,6 +146,13 @@ class Analysis_PPG_SPG:
         return (x1, y1, x2, y2)
 
     def cal_contrast(self, frame):
+        
+        # Check GPU availability
+        print(f"CUDA Available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"GPU Device: {torch.cuda.get_device_name(0)}")
+            return self.cal_contrast_gpu(frame)
+
         # Calculate the contrast of the frame
         shape = frame.shape
 
