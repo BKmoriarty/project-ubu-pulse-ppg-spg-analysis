@@ -4,4 +4,5 @@ serial.xlsx
 video.avi
 __pycache__/
 .vscode/
+example/.vs
 storage
