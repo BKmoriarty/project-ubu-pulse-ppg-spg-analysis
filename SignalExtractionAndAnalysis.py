@@ -269,8 +269,8 @@ class Analysis_PPG_SPG:
             signal_intensity = np.mean(roi_ppg)
             signal_ppg.append(signal_intensity)
 
-            # contrast = self.cal_contrast(roi_spg)
-            contrast = self.cal_contrast_gpu(roi_spg)
+            contrast = self.cal_contrast(roi_spg)
+            # contrast = self.cal_contrast_gpu(roi_spg)
             mean_contrast_frame.append(np.mean(contrast))  # mean contrast
 
             # Calculate mean exposure using the formula: 1 / (2 * T * K^2)
