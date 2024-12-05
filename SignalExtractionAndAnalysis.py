@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.fft import fft, fftfreq
 from scipy.signal import butter, filtfilt, find_peaks
 from time import process_time
+import torch
 
 
 class ImageCropper:
@@ -51,33 +52,6 @@ class ImageCropper:
                 break
         cv2.destroyAllWindows()
         return self.x_start, self.y_start, self.x_end, self.y_end
-
-
-class VideoSaving:
-
-    def init(self, video_path,  frame=[]):
-        self.video_path = video_path
-
-        self.frame = frame
-
-    def add(self, frame):
-        self.frame.append(frame)
-
-    def save(self):
-        height, width, = self.frame[0].shape
-        size = (width, height)
-        out = cv2.VideoWriter(
-            self.video_path, cv2.VideoWriter_fourcc(*'XVID'), self.fps, size)
-        for i in range(len(self.frame)):
-            out.write(self.frame[i])
-        out.release()
-
-    def save_image(self, frame, name):
-        cv2.imwrite(f'{name}.jpg', frame)
-
-    def stop(self):
-        cv2.destroyAllWindows()
-
 
 class Analysis_PPG_SPG:
 
@@ -179,6 +153,30 @@ class Analysis_PPG_SPG:
                           for j in range(0, shape[1]-self.size_block+1, self.size_block)]
                          for i in range(0, shape[0]-self.size_block+1, self.size_block)])
 
+    def cal_contrast_gpu(self,frame):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Convert frame to GPU tensor
+        frame_tensor = torch.from_numpy(frame).float().to(device)
+        shape = frame_tensor.shape
+        
+        # Initialize output tensor
+        height = (shape[0] - self.size_block + 1) // self.size_block
+        width = (shape[1] - self.size_block + 1) // self.size_block
+        result = torch.zeros((height, width), device=device)
+        
+        # Unfold the frame into blocks
+        blocks = frame_tensor.unfold(0, self.size_block, self.size_block).unfold(1, self.size_block, self.size_block)
+        
+        # Calculate mean and std for each block
+        means = blocks.mean(dim=(2,3))
+        stds = blocks.std(dim=(2,3), unbiased=True)  # Added unbiased=True to match numpy
+        
+        # Calculate contrast
+        result = stds / (means + 1e-6)  # Add small epsilon to avoid division by zero
+        
+        return result.cpu().numpy()
+
     def extract_video_frames(self, video_path):
         cap = cv2.VideoCapture(video_path)
 
@@ -264,7 +262,8 @@ class Analysis_PPG_SPG:
             signal_intensity = np.mean(roi_ppg)
             signal_ppg.append(signal_intensity)
 
-            contrast = self.cal_contrast(roi_spg)
+            # contrast = self.cal_contrast(roi_spg)
+            contrast = self.cal_contrast_gpu(roi_spg)
             mean_contrast_frame.append(np.mean(contrast))  # mean contrast
 
             # Calculate mean exposure using the formula: 1 / (2 * T * K^2)
@@ -313,24 +312,6 @@ class Analysis_PPG_SPG:
 
         return np.array(signal_ppg), np.array(mean_contrast_frame), np.array(mean_exposure_frame)
 
-    def plot_signal(self, signal_ppg):
-        plt.figure(figsize=(10, 4))
-        plt.plot(signal_ppg, color='blue', label='Extracted Signal')
-        plt.title('Extracted Heart Wave Signal')
-        plt.xlabel('Frame')
-        plt.ylabel('Intensity')
-        # plt.legend()
-        plt.show()
-
-    def plot_spectrum(self, xf, yf):
-        plt.figure(figsize=(10, 4))
-        plt.plot(xf, yf, color='blue', label='Spectrum')
-        plt.title('Frequency Spectrum of the Extracted Signal')
-        plt.xlabel('Frequency (Hz)')
-        plt.ylabel('Amplitude')
-        # plt.legend()
-        plt.show()
-
     def bandpass_filter(self, signal, lowcut, highcut, fs, order=3):
         nyquist = 0.5 * fs
         low = lowcut / nyquist
@@ -366,7 +347,7 @@ class Analysis_PPG_SPG:
         yf = fft(signal_ppg)
         xf = fftfreq(N, 1 / frame_rate)
         xf = xf[:N//2]
-        yf = np.abs(yf[:N//2])
+        yf = np.abs(np.array(yf[:N//2]))
         return xf, yf
 
     def define_fft(self, data,):
@@ -376,30 +357,8 @@ class Analysis_PPG_SPG:
         fft_data = fft_data[0:len(data)//2]
         return fft_data
 
-    # Plot the signal (time domain)
-
-    def plot_signal(self, signal_ppg, title="Signal"):
-        plt.figure(figsize=(10, 4))
-        plt.plot(signal_ppg, color='blue', label=title)
-        plt.title(title)
-        plt.xlabel('Frame')
-        plt.ylabel('Intensity')
-        # plt.legend()
-        plt.show()
-
-    # Plot the frequency spectrum (frequency domain)
-
-    def plot_spectrum(self, xf, yf, title="Frequency Spectrum"):
-        plt.figure(figsize=(10, 4))
-        plt.plot(xf, yf, color='blue', label=title)
-        plt.title(title)
-        plt.xlabel('Frequency (Hz)')
-        plt.ylabel('Amplitude')
-        # plt.legend()
-        plt.show()
-
     def load_excel(self, file_name_excel):
-       # Read the Excel file
+        # Read the Excel file
         df = pd.read_excel(file_name_excel)
         # Convert the date column to datetime format if it's not already
         df['Time'] = pd.to_datetime(df['Data'], format='%H:%M:%S.%f')
@@ -418,9 +377,10 @@ class Analysis_PPG_SPG:
         # Filter the data based on the date range
         filtered_df = df[(df['Time'] >= start_date) & (df['Time'] <= end_date)]
 
-        time_excel = (filtered_df['Time'] - filtered_df['Time'].min()
-                      ).dt.total_seconds()
-        amplitude_excel = filtered_df['Value'].values
+        # Calculate the time differences as a pandas Series
+        time_excels = (pd.Series(filtered_df['Time']) - filtered_df['Time'].min())
+        time_excel = time_excels.dt.total_seconds()
+        amplitude_excel = pd.Series(filtered_df['Value']).values
 
         return [time_excel, amplitude_excel]
 
@@ -442,7 +402,7 @@ class Analysis_PPG_SPG:
         xf = fftfreq(n, 1/sample_rate)
 
         # Calculate power
-        power = np.abs(yf)**2 / n
+        power = np.abs(np.array(yf))**2 / n
 
         # Find signal power
         signal_power = np.sum(
