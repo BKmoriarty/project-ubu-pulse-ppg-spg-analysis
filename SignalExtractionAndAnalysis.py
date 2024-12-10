@@ -1,3 +1,6 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+
 import cv2
 from matplotlib.widgets import MultiCursor
 import numpy as np
@@ -239,13 +242,12 @@ class Analysis_PPG_SPG:
         length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) + 1
         i = 0
         
-        use_gpu = False
-        
+        use_GPU = False
         # Check GPU availability
         print(f"CUDA Available: {torch.cuda.is_available()}")
         if torch.cuda.is_available():
             print(f"GPU Device: {torch.cuda.get_device_name(0)}")
-            use_gpu = True
+            use_GPU = True
 
         self.printProgressBar(0, length, prefix='Progress:',
                               suffix='Complete', length=50)
@@ -253,7 +255,7 @@ class Analysis_PPG_SPG:
 
         # video = cv2.VideoWriter(
         #     "roi.avi", cv2.VideoWriter_fourcc(*'XVID'), self.fps, (self.size_ppg, self.size_ppg))
-
+        
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -270,9 +272,8 @@ class Analysis_PPG_SPG:
             # Calculate the mean pixel intensity in the ROI
             signal_intensity = np.mean(roi_ppg)
             signal_ppg.append(signal_intensity)
-
-            # contrast = self.cal_contrast(roi_spg)
-            contrast = self.cal_contrast_gpu(roi_spg) if use_gpu else self.cal_contrast(roi_spg)
+                
+            contrast = self.cal_contrast_gpu(roi_spg) if use_GPU else self.cal_contrast(roi_spg)
             mean_contrast_frame.append(np.mean(contrast))  # mean contrast
 
             # Calculate mean exposure using the formula: 1 / (2 * T * K^2)
