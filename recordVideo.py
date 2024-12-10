@@ -2,15 +2,22 @@ from datetime import datetime
 import PySpin
 import cv2
 import keyboard
+import threading
+import queue
+import numpy as np
+from time import sleep
+
+from SignalQualityAssessment import PPGQualityAssessment
 
 class AviType:
     """'Enum' to select AVI video type to be created and saved"""
     UNCOMPRESSED = 0
     MJPG = 1
     H264 = 2
+    
 
 class RecordVideo():
-    def __init__(self,fps=30,exposure_time=1000,width = 200,height = 200,filename="VIDEO",time_record=20) -> None:
+    def __init__(self,fps=300,exposure_time=2500,width = 200,height = 200,filename="VIDEO",time_record=20) -> None:
         self.fps = fps
         self.exposure_time = exposure_time
         self.width = width
@@ -22,6 +29,8 @@ class RecordVideo():
         self.frame_images = fps * time_record
 
         self.continue_recording = True
+        self.image_queue = queue.Queue()
+        self.image_list = []
         self.stop = False
         self.first_frame_time = None
         self.last_frame_time = None
@@ -268,17 +277,7 @@ class RecordVideo():
         self.continue_recording = False
 
     def acquire_images(self,cam, nodemap):
-        """
-        This function acquires 30 images from a device, stores them in a list, and returns the list.
-        please see the Acquisition example for more in-depth comments on acquiring images.
-
-        :param cam: Camera to acquire images from.
-        :param nodemap: Device nodemap.
-        :type cam: CameraPtr
-        :type nodemap: INodeMap
-        :return: True if successful, False otherwise.
-        :rtype: bool
-        """
+        
         print('*** IMAGE ACQUISITION ***\n')
         
         # Retrieve, convert, and save images
@@ -391,8 +390,6 @@ class RecordVideo():
 
             print('Acquiring images...')
 
-            
-
             # Create ImageProcessor instance for post processing images
             processor = PySpin.ImageProcessor()
 
@@ -416,6 +413,7 @@ class RecordVideo():
                         print('Image incomplete with image status %d...' % image_result.GetImageStatus())
 
                     else:
+                        self.image_queue.put(image_result)
                         #  Print image information; height and width recorded in pixels
                         width = image_result.GetWidth()
                         height = image_result.GetHeight()
@@ -606,6 +604,9 @@ class RecordVideo():
                     else:
                         # Getting the image data as a numpy array
                         image_data = image_result.GetNDArray()
+                        
+                        self.image_queue.put(image_data)
+                        # self.image_list.append(image_data)
 
                         # Display the image using OpenCV
                         cv2.imshow('Camera Feed', image_data)
@@ -650,6 +651,102 @@ class RecordVideo():
 
         return True
 
+    def calculate_and_plot_mean(self):
+        import matplotlib.pyplot as plt
+        import numpy as np
+        import time
+
+        # Initialize interactive plotting
+        plt.ion()
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5))
+        frames_buffer = []
+        last_plot_time = time.time()
+
+        # Set up plot titles and labels
+        ax1.set_title('Time Domain Signal')
+        ax1.set_xlabel('Frame')
+        ax1.set_ylabel('Amplitude')
+
+        while self.continue_recording:
+            if not self.image_queue.empty():
+                # Retrieve image data from the queue
+                image_data = self.image_queue.get()
+                # Calculate mean value of the image data
+                mean_value = np.mean(image_data)
+                frames_buffer.append(mean_value)
+
+                current_time = time.time()
+                # Plot every 5 seconds
+                if current_time - last_plot_time >= 5:
+                    if frames_buffer:
+                        # Clear previous plots and plot time domain signal
+                        ax1.clear()
+                        ax1.plot(frames_buffer, color='blue', label='Mean Amplitude')
+                        ax1.set_title('Time Domain Signal')
+                        ax1.set_xlabel('Frame')
+                        ax1.set_ylabel('Amplitude')
+                        ax1.legend()
+
+                        # Plot frequency spectrum
+                        self.plot_spectrum(frames_buffer, ax2)
+
+                        # Update plots
+                        fig.canvas.draw_idle()
+                        fig.canvas.flush_events()
+
+                        # Clear buffer for next interval
+                        frames_buffer.clear()
+                        last_plot_time = current_time
+
+            # Print the current size of the image queue for monitoring
+            print("Current image queue size:", self.image_queue.qsize())
+            plt.pause(0.001)  # Small pause to allow GUI updates
+
+    def plot_spectrum(self, signal, ax):
+        """
+        Plot the frequency spectrum of the given signal.
+
+        :param signal: The input time-domain signal
+        :param ax: The matplotlib axis to plot on
+        """
+        import numpy as np
+
+        if len(signal) < 2:
+            print("Signal is too short to compute spectrum.")
+            return
+
+        # Compute the Fast Fourier Transform (FFT) of the signal
+        fps = self.fps  # Use the actual sampling rate
+        n = len(signal)
+        fft_result = np.fft.fft(signal)
+        freqs = np.fft.fftfreq(n, d=1/fps)
+
+        # Filter to only positive frequencies
+        pos_mask = freqs >= 0
+        freqs = freqs[pos_mask]
+        magnitude = np.abs(fft_result)[pos_mask]
+
+        # Clear any previous plot on the axis
+        ax.clear()
+
+        # Plot the frequency spectrum
+        ax.plot(freqs, magnitude, label='Magnitude Spectrum', color='b', linewidth=1.5)
+        ax.set_title('Frequency Spectrum', fontsize=14)
+        ax.set_xlabel('Frequency (Hz)', fontsize=12)
+        ax.set_ylabel('Magnitude', fontsize=12)
+        ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+        ax.axvline(x=0.8, color='r', linestyle='--', label='Lower Bound (0.8 Hz)')
+        ax.axvline(x=4, color='g', linestyle='--', label='Upper Bound (4 Hz)')
+
+        # Set x-axis limits to a maximum of 10 Hz
+        ax.set_xlim(0, min(10, max(freqs)))
+
+        # Set y-axis limits with a focus on typical PPG frequency ranges
+        ax.set_ylim(0, 600)
+
+        # Enable legend
+        ax.legend(loc='upper right', fontsize=10)
+        
     def save_list_to_avi(self, nodemap, nodemap_tldevice, images):
         """
         This function prepares, saves, and cleans up an AVI video from a vector of images.
@@ -838,8 +935,16 @@ class RecordVideo():
                 return False
 
             # Acquire images
-            result &= self.acquire_and_display_images(cam, nodemap, nodemap_tldevice)
+            # result &= self.acquire_and_display_images(cam, nodemap, nodemap_tldevice)
+            
+            acquisition_thread = threading.Thread(target=self.acquire_and_display_images, args=(cam, nodemap, nodemap_tldevice))
+            
+            acquisition_thread.start()
 
+            self.calculate_and_plot_mean()  # Start the plotting on the main thread
+
+            acquisition_thread.join()
+            
             # Deinitialize camera
             cam.DeInit()
 
@@ -904,4 +1009,4 @@ if __name__ == '__main__':
     record.init_camera()
     # input("Tap show...")
     record.display_images()
-    record.start()
+    # record.start()

@@ -223,8 +223,8 @@ if __name__ == '__main__':
     size_cam = (200, 200)  # W x H
     size_ppg = 200  # W x H
     size_spg = 100  # W x H
-    fps = 350  # Hz
-    exposure_time = 1200
+    fps = 300  # Hz
+    exposure_time = 1500 # 2500
     # int(calculate_exposure_time(fps))
     cache = False
 

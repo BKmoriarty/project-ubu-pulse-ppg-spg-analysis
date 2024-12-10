@@ -146,13 +146,6 @@ class Analysis_PPG_SPG:
         return (x1, y1, x2, y2)
 
     def cal_contrast(self, frame):
-        
-        # Check GPU availability
-        print(f"CUDA Available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"GPU Device: {torch.cuda.get_device_name(0)}")
-            return self.cal_contrast_gpu(frame)
-
         # Calculate the contrast of the frame
         shape = frame.shape
 
@@ -194,9 +187,10 @@ class Analysis_PPG_SPG:
         x1_spg, y1_spg, x2_spg, y2_spg = self.get_center_crop_position(
             frame.shape, self.size_spg)
 
-        color_ppg = (0, 255, 0)
-        color_spg = (255, 0, 0)
-        thickness = 2
+        # color_ppg = (0, 255, 0)
+        # color_spg = (255, 0, 0)
+        # thickness = 2
+        
         # cv2.rectangle(frame, (x1_ppg, y1_ppg),
         #               (x2_ppg, y2_ppg), color_ppg, thickness)
         # cv2.rectangle(frame, (x1_spg, y1_spg),
@@ -244,6 +238,14 @@ class Analysis_PPG_SPG:
 
         length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) + 1
         i = 0
+        
+        use_gpu = False
+        
+        # Check GPU availability
+        print(f"CUDA Available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"GPU Device: {torch.cuda.get_device_name(0)}")
+            use_gpu = True
 
         self.printProgressBar(0, length, prefix='Progress:',
                               suffix='Complete', length=50)
@@ -269,8 +271,8 @@ class Analysis_PPG_SPG:
             signal_intensity = np.mean(roi_ppg)
             signal_ppg.append(signal_intensity)
 
-            contrast = self.cal_contrast(roi_spg)
-            # contrast = self.cal_contrast_gpu(roi_spg)
+            # contrast = self.cal_contrast(roi_spg)
+            contrast = self.cal_contrast_gpu(roi_spg) if use_gpu else self.cal_contrast(roi_spg)
             mean_contrast_frame.append(np.mean(contrast))  # mean contrast
 
             # Calculate mean exposure using the formula: 1 / (2 * T * K^2)
@@ -426,6 +428,36 @@ class Analysis_PPG_SPG:
 
         return snr, xf, power
 
+    def calculate_snr_hybrid_method(self, data, sample_rate, heart_rate_freq_range):
+        # Perform FFT
+        n = len(data)
+        yf = fft(data)
+        xf = fftfreq(n, 1/sample_rate)
+
+        # Calculate power
+        power = np.abs(np.array(yf))**2 / n
+
+        # Frequency domain: Find peak frequency within heart rate range
+        heart_rate_indices = (xf >= heart_rate_freq_range[0]) & (xf <= heart_rate_freq_range[1])
+        peak_index = np.argmax(power[heart_rate_indices])
+        peak_power = power[heart_rate_indices][peak_index]
+
+        # Time domain: Calculate mean and variance
+        mean_signal = np.mean(data)
+        variance_signal = np.var(data)
+
+        # Define signal and noise areas
+        signal_area = peak_power / 2 + variance_signal
+        noise_area = np.sum(power) - signal_area
+        
+        print('Signal area: ', signal_area)
+        print('Noise area: ', noise_area)
+
+        # Calculate SNR
+        snr = 10 * np.log10(signal_area / noise_area)
+
+        return snr, xf, power
+
     def snr_cal(self, fre_ppg, psd_ppg, lowCut_snr, highCut_snr):
         power_ppg = 0
         power_noise_ppg = 0
@@ -558,7 +590,7 @@ class Analysis_PPG_SPG:
         ax5.plot(filtered_signal_fft1[0][max_filtered_ppg], filtered_signal_fft1[1][max_filtered_ppg],
                  color='r', label="Peaks iPPG Filtered FFT", marker='o', linestyle='')
         # ax5.legend()
-        ax5.set_xlabel('Time (s)')
+        ax5.set_xlabel('Frequency (Hz)')
         ax5.set_ylabel('Amplitude')
 
         ax6.plot(time_ppg, filtered_ppg, color='r',
@@ -612,7 +644,7 @@ class Analysis_PPG_SPG:
         ax2.plot(filtered_spg_fft[0][max_filtered_spg], filtered_spg_fft[1][max_filtered_spg],
                  color='r', label="Peaks SPG Filtered FFT", marker='o', linestyle='')
         # ax2.legend()
-        ax2.set_xlabel('Time (s)')
+        ax2.set_xlabel('Frequency (Hz)')
         ax2.set_ylabel('Amplitude')
 
         ax3.plot(time_spg, filtered_spg, color='r',
@@ -668,7 +700,7 @@ class Analysis_PPG_SPG:
         ax11.plot(filtered_excel_fft[0][max_filtered_excel], filtered_excel_fft[1][max_filtered_excel],
                   color='r', label="Peaks cPPG Filtered FFT", marker='o', linestyle='')
         # ax11.legend()
-        ax11.set_xlabel('Time (s)')
+        ax11.set_xlabel('Frequency (Hz)')
         ax11.set_ylabel('Amplitude')
 
         ax12.plot(excel_data[0], filtered_excel/np.max(filtered_excel), color='r',
@@ -681,39 +713,65 @@ class Analysis_PPG_SPG:
 
         fig.tight_layout()
         fig.savefig(f'storage/{self.dir_path}/cPPG.png')
+        
+        # =========================== SNR PEAK METHOD ===========================
+        
+        heart_rate_freq_range_ppg = (0.9, 3)
+        heart_rate_freq_range_spg = (0.9, 3)
+        heart_rate_freq_range_excel = (0.9, 3)
+        
+        # ppg
+        snr_filtered_ppg, frequencies_filtered_ppg, power_filtered_ppg = self.calculate_snr_hybrid_method(
+            filtered_ppg, fps, heart_rate_freq_range_ppg)
+
+        print(f"SNR of the iPPG values: {snr_filtered_ppg:.2f} dB")
+
+        # spg
+        snr_filtered_spg, frequencies_filtered_spg, power_filtered_spg = self.calculate_snr_hybrid_method(
+            filtered_spg, fps, heart_rate_freq_range_spg)
+
+        print(
+            f"SNR of the SPG values: {snr_filtered_spg:.2f} dB")
+
+        # excel
+        snr_filtered_excel, frequencies_excel, power_excel = self.calculate_snr_hybrid_method(
+            filtered_excel, fps_excel, heart_rate_freq_range_excel)
+
+        print(
+            f"SNR of the cPPG values: {snr_filtered_excel:.2f} dB")
 
         # =========================== SNR ===========================
 
-        # mean
-        snr_signal_values, frequencies_signal_values, power_signal_values = self.calculate_snr(
-            signal_ppg, fps, signal_freq_range_ppg, noise_freq_range_ppg)
+        # # mean
+        # snr_signal_values, frequencies_signal_values, power_signal_values = self.calculate_snr(
+        #     signal_ppg, fps, signal_freq_range_ppg, noise_freq_range_ppg)
 
-        # ppg
-        snr_filtered_ppg, frequencies_filtered_ppg, power_filtered_ppg = self.calculate_snr(
-            filtered_ppg, fps, signal_freq_range_ppg, noise_freq_range_ppg)
+        # # ppg
+        # snr_filtered_ppg, frequencies_filtered_ppg, power_filtered_ppg = self.calculate_snr(
+        #     filtered_ppg, fps, signal_freq_range_ppg, noise_freq_range_ppg)
 
-        print(
-            f"SNR of the iPPG values: {snr_signal_values:.2f} -> {snr_filtered_ppg:.2f} dB")
+        # print(
+        #     f"SNR of the iPPG values: {snr_signal_values:.2f} -> {snr_filtered_ppg:.2f} dB")
 
-        # spg
-        snr_spg, frequencies_spg, power_spg = self.calculate_snr(
-            mean_exposure_frame, fps, signal_freq_range_spg, noise_freq_range_spg)
+        # # spg
+        # snr_spg, frequencies_spg, power_spg = self.calculate_snr(
+        #     mean_exposure_frame, fps, signal_freq_range_spg, noise_freq_range_spg)
 
-        snr_filtered_spg, frequencies_filtered_spg, power_filtered_spg = self.calculate_snr(
-            filtered_spg, fps, signal_freq_range_spg, noise_freq_range_spg)
+        # snr_filtered_spg, frequencies_filtered_spg, power_filtered_spg = self.calculate_snr(
+        #     filtered_spg, fps, signal_freq_range_spg, noise_freq_range_spg)
 
-        print(
-            f"SNR of the SPG values: {snr_spg:.2f} -> {snr_filtered_spg:.2f} dB")
+        # print(
+        #     f"SNR of the SPG values: {snr_spg:.2f} -> {snr_filtered_spg:.2f} dB")
 
-        # excel
-        snr_excel, frequencies_excel, power_excel = self.calculate_snr(
-            excel_data[1], fps_excel, signal_freq_range_excel, noise_freq_range_excel)
+        # # excel
+        # snr_excel, frequencies_excel, power_excel = self.calculate_snr(
+        #     excel_data[1], fps_excel, signal_freq_range_excel, noise_freq_range_excel)
 
-        snr_filtered_excel, frequencies_excel, power_excel = self.calculate_snr(
-            filtered_excel, fps_excel, signal_freq_range_excel, noise_freq_range_excel)
+        # snr_filtered_excel, frequencies_excel, power_excel = self.calculate_snr(
+        #     filtered_excel, fps_excel, signal_freq_range_excel, noise_freq_range_excel)
 
-        print(
-            f"SNR of the cPPG values: {snr_excel:.2f} -> {snr_filtered_excel:.2f} dB")
+        # print(
+        #     f"SNR of the cPPG values: {snr_excel:.2f} -> {snr_filtered_excel:.2f} dB")
 
         # =========================== Time Delay ===========================
         time_plot = np.arange(mean_exposure_frame.size) / fps
@@ -808,7 +866,7 @@ class Analysis_PPG_SPG:
                       [1, 1], f'{color}-', alpha=0.5)
 
         ax13.grid()
-        ax13.legend()
+        # ax13.legend()
         ax13.set_title('Time Delay Between PPG and SPG Peaks')
         ax13.set_xlabel('Time (s)')
         ax13.set_ylabel('Normalized Amplitude')
@@ -825,14 +883,14 @@ class Analysis_PPG_SPG:
         ax14.set_ylabel('Time Delay (s)')
         ax14.set_title('Time Delays Between Corresponding Peaks')
         ax14.grid()
-        ax14.legend()
+        # ax14.legend()
 
         # Plot difference between SPG and PPG signals
         ax15.plot(time_plot, diff, color='b',
                   label=f'Avg Diff: {avg_diff:.4f}')
         ax15.axhline(y=avg_diff, color='gray', linestyle='--')
 
-        ax15.legend()
+        # ax15.legend()
         ax15.grid()
         ax15.set_title('Difference Between SPG and PPG Signals')
         ax15.set_xlabel('Time (s)')
@@ -856,7 +914,7 @@ class Analysis_PPG_SPG:
         ax7.plot(time_plot[peaks_filtered_spg], (filtered_spg/np.max(filtered_spg))[peaks_filtered_spg],
                  color='g', label="Peaks SPG", marker='o', linestyle='')
         ax7.grid()
-        ax7.legend()
+        # ax7.legend()
         ax7.set_title('Integrate Signal')
         ax7.set_xlabel('Time (s)')
         ax7.set_ylabel('Amplitude')
@@ -879,7 +937,7 @@ class Analysis_PPG_SPG:
                  color='r', label='Peaks cPPG', marker='o', linestyle='')
 
         ax8.grid()
-        ax8.legend()
+        # ax8.legend()
         ax8.set_title('Integrate iPPG Signal')
         ax8.set_xlabel('Time (s)')
         ax8.set_ylabel('Amplitude')
@@ -893,7 +951,7 @@ class Analysis_PPG_SPG:
         ax9.plot(time_plot[peaks_filtered_spg], (filtered_spg/np.max(filtered_spg))[peaks_filtered_spg],
                  color='g', label="Peaks SPG", marker='o', linestyle='')
         ax9.grid()
-        ax9.legend()
+        # ax9.legend()
         ax9.set_title('Integrate SPG Signal')
         ax9.set_xlabel('Time (s)')
         ax9.set_ylabel('Amplitude')
@@ -915,13 +973,13 @@ if __name__ == "__main__":
 
     exposure_time = 6000  # us
     size_ppg = 200  # W x H 200
-    size_spg = 150  # W x H 100
-    fps = 88  # Hz 88
-    cache = False
+    size_spg = 100  # W x H 100
+    fps = 300  # Hz 88
+    cache = True
     cut_time_delay = 0.2
 
-    folder = "2024-11-14 15_26_51 tee 6000 88 200"
-    video_path = f"storage/{folder}/video.avi"
+    folder = "2024-12-10 16_24_53 tee 2500 300 (200, 200) rate-10 good"
+    video_path = f"storage/{folder}/video-0000.avi"
     serial_path = f"storage/{folder}/serial.xlsx"
 
     analysis = Analysis_PPG_SPG(
