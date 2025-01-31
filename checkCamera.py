@@ -18,7 +18,7 @@ from recordVideo import RecordVideo
 
 class Main():
     def __init__(self, port_name='COM10', exposure_time=2200, name: str = 'unknown', fps=30, size=(600, 600), lenght=20):
-        
+
         self.frame: tuple = size
         self.fps = fps
         self.length = lenght
@@ -110,7 +110,8 @@ class Main():
 
         print(f'Time Excel : {(time.time()-start_time):.6f} Second.')
         if len(serial_data) > 0:
-            df = pd.DataFrame(serial_data, columns=pd.Index(self.custom_header))
+            df = pd.DataFrame(
+                serial_data, columns=pd.Index(self.custom_header))
 
             # Time type to float
             df['Time'] = df['Time'].astype(float)
@@ -142,8 +143,6 @@ class Main():
 
         print("Serial data saved")
 
-    
-        
     def run(self):
         self.camera.display_images()
 
@@ -223,12 +222,12 @@ if __name__ == '__main__':
     size_cam = (200, 200)  # W x H
     size_ppg = 200  # W x H
     size_spg = 100  # W x H
-    fps = 300  # Hz
-    exposure_time = 1500 # 2500
+    fps = 120  # Hz
+    exposure_time = 6000  # 2500
     # int(calculate_exposure_time(fps))
     cache = False
 
-    length = 20  # second
+    length = 30  # second
 
     print(f"Exposure Time: {exposure_time} us")
 
@@ -239,7 +238,7 @@ if __name__ == '__main__':
     print(f'path: "{video_path}", "{serial_path}"')
 
     analysis = Analysis_PPG_SPG(
-        video_path, serial_path, size_ppg, size_spg, exposure_time, fps)
+        video_path, serial_path, size_ppg, size_spg, main.camera.exposure_time, fps, time_record=length)
     ppg, spg, excel = analysis.main()
     plt.show()
 
@@ -248,6 +247,6 @@ if __name__ == '__main__':
     feedback = input("Enter feedback: ")
 
     # rename folder
-    folder_name = f"storage/{main.current_time} {name} {exposure_time} {fps} {size_cam} rate-{feedback_rate} {feedback}"
+    folder_name = f"storage/{main.current_time} {name} {int(main.camera.exposure_time)} {fps} {size_cam} rate-{feedback_rate} {feedback}"
     os.rename(
         f"storage/{main.current_time} {name} {exposure_time} {fps} {size_cam}", folder_name)

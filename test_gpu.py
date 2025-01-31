@@ -80,7 +80,7 @@ def test_contrast_processing():
         print(f"GPU Device: {torch.cuda.get_device_name(0)}")
 
     # Open a video file
-    video_path = "video-0000.avi"
+    video_path = "storage/2024-12-10 16_24_53 tee 2500 300 (200, 200) rate-10 good/video-0000.avi"
     cap = cv2.VideoCapture(video_path)
     
     if not cap.isOpened():
@@ -88,7 +88,7 @@ def test_contrast_processing():
         return
 
     block_size = 3
-    num_frames = 7000
+    num_frames = 1000
 
     size = 100
     max_x = cap.get(cv2.CAP_PROP_FRAME_WIDTH)

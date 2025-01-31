@@ -9,17 +9,19 @@ from time import sleep
 
 from SignalQualityAssessment import PPGQualityAssessment
 
+
 class AviType:
     """'Enum' to select AVI video type to be created and saved"""
     UNCOMPRESSED = 0
     MJPG = 1
     H264 = 2
-    
+
 
 class RecordVideo():
-    def __init__(self,fps=300,exposure_time=2500,width = 200,height = 200,filename="VIDEO",time_record=20) -> None:
+    def __init__(self, fps=120, exposure_time=2500, width=120, height=120, filename="VIDEO", time_record=20) -> None:
         self.fps = fps
         self.exposure_time = exposure_time
+        self.max_exposure_time = 0
         self.width = width
         self.height = height
         self.chosenAviType = AviType.UNCOMPRESSED  # change me!
@@ -44,7 +46,8 @@ class RecordVideo():
 
         # Get current library version
         version = self.system.GetLibraryVersion()
-        print('Library version: %d.%d.%d.%d' % (version.major, version.minor, version.type, version.build))
+        print('Library version: %d.%d.%d.%d' %
+              (version.major, version.minor, version.type, version.build))
 
         # Retrieve list of cameras from the system
         cam_list = self.system.GetCameras()
@@ -64,12 +67,12 @@ class RecordVideo():
             print('Not enough cameras!')
             input('Done! Press Enter to exit...')
             return False
-        
+
         self.cam_list = cam_list
 
         return True
-    
-    def configure_exposure(self,cam):
+
+    def configure_exposure(self, cam):
         """
         This function configures a custom exposure time. Automatic exposure is turned
         off in order to allow for the customization, and then the custom setting is
@@ -128,9 +131,10 @@ class RecordVideo():
                 return False
 
             # Ensure desired exposure time does not exceed the maximum
-            print('max exposure:',cam.ExposureTime.GetMax())
+            print('max exposure:', cam.ExposureTime.GetMax())
             exposure_time_to_set = self.exposure_time
-            exposure_time_to_set = min(cam.ExposureTime.GetMax(), exposure_time_to_set)
+            exposure_time_to_set = min(
+                cam.ExposureTime.GetMax(), exposure_time_to_set)
             cam.ExposureTime.SetValue(exposure_time_to_set)
             print('Shutter time set to %s us...\n' % exposure_time_to_set)
 
@@ -140,7 +144,7 @@ class RecordVideo():
 
         return result
 
-    def configure_custom_image_settings(self,cam):
+    def configure_custom_image_settings(self, cam):
         """
         Configures a number of settings on the camera including offsets X and Y,
         width, height, and pixel format. These settings must be applied before
@@ -167,13 +171,14 @@ class RecordVideo():
                         # Get limits
                         min_frame_rate = cam.AcquisitionFrameRate.GetMin()
                         max_frame_rate = cam.AcquisitionFrameRate.GetMax()
-                        print(f'Frame rate range: {min_frame_rate} to {max_frame_rate} fps')
-                        
+                        print(
+                            f'Frame rate range: {min_frame_rate} to {max_frame_rate} fps')
+
                         # Set frame rate (make sure it's within range)
                         frame_rate = min(max_frame_rate, float(self.fps))
                         cam.AcquisitionFrameRate.SetValue(frame_rate)
                         print(f'Frame rate set to: {frame_rate} fps')
-                        
+
                         # Verify the frame rate was set
                         actual_frame_rate = cam.AcquisitionFrameRate.GetValue()
                         print(f'Actual frame rate: {actual_frame_rate} fps')
@@ -183,11 +188,11 @@ class RecordVideo():
             # Apply mono 8 pixel format
             if cam.PixelFormat.GetAccessMode() == PySpin.RW:
                 cam.PixelFormat.SetValue(PySpin.PixelFormat_Mono8)
-                print('Pixel format set to %s...' % cam.PixelFormat.GetCurrentEntry().GetSymbolic())
+                print('Pixel format set to %s...' %
+                      cam.PixelFormat.GetCurrentEntry().GetSymbolic())
             else:
                 print('Pixel format not available...')
                 result = False
-
 
             # Get the camera's actual sensor dimensions
             nodemap = cam.GetNodeMap()
@@ -195,7 +200,8 @@ class RecordVideo():
             sensor_height = PySpin.CIntegerPtr(nodemap.GetNode('SensorHeight'))
 
             if not PySpin.IsReadable(sensor_width) or not PySpin.IsReadable(sensor_height):
-                print('Unable to read sensor dimensions. Using Width/Height max values instead.')
+                print(
+                    'Unable to read sensor dimensions. Using Width/Height max values instead.')
                 max_width = cam.Width.GetMax()
                 max_height = cam.Height.GetMax()
             else:
@@ -254,14 +260,15 @@ class RecordVideo():
 
         try:
             result = True
-            node_device_information = PySpin.CCategoryPtr(nodemap.GetNode('DeviceInformation'))
+            node_device_information = PySpin.CCategoryPtr(
+                nodemap.GetNode('DeviceInformation'))
 
             if PySpin.IsReadable(node_device_information):
                 features = node_device_information.GetFeatures()
                 for feature in features:
                     node_feature = PySpin.CValuePtr(feature)
                     print('%s: %s' % (node_feature.GetName(),
-                                    node_feature.ToString() if PySpin.IsReadable(node_feature) else 'Node not readable'))
+                                      node_feature.ToString() if PySpin.IsReadable(node_feature) else 'Node not readable'))
 
             else:
                 print('Device control information not readable.')
@@ -272,38 +279,42 @@ class RecordVideo():
 
         return result
 
-    def handle_close(self,evt):
-        
+    def handle_close(self, evt):
+
         self.continue_recording = False
 
-    def acquire_images(self,cam, nodemap):
-        
+    def acquire_images(self, cam, nodemap):
+
         print('*** IMAGE ACQUISITION ***\n')
-        
+
         # Retrieve, convert, and save images
         images = list()
-            
+
         try:
             result = True
 
             # Set acquisition mode to continuous
-            node_acquisition_mode = PySpin.CEnumerationPtr(nodemap.GetNode('AcquisitionMode'))
+            node_acquisition_mode = PySpin.CEnumerationPtr(
+                nodemap.GetNode('AcquisitionMode'))
             if not PySpin.IsReadable(node_acquisition_mode) or not PySpin.IsWritable(node_acquisition_mode):
-                print('Unable to set acquisition mode to continuous (enum retrieval). Aborting...')
+                print(
+                    'Unable to set acquisition mode to continuous (enum retrieval). Aborting...')
                 return False
-            
+
             # Retrieve entry node from enumeration node
-            node_acquisition_mode_continuous = node_acquisition_mode.GetEntryByName('Continuous')
+            node_acquisition_mode_continuous = node_acquisition_mode.GetEntryByName(
+                'Continuous')
             if not PySpin.IsReadable(node_acquisition_mode_continuous):
-                print('Unable to set acquisition mode to continuous (entry retrieval). Aborting...')
+                print(
+                    'Unable to set acquisition mode to continuous (entry retrieval). Aborting...')
                 return False
 
             acquisition_mode_continuous = node_acquisition_mode_continuous.GetValue()
 
             node_acquisition_mode.SetIntValue(acquisition_mode_continuous)
-            
+
             print('Acquisition mode set to continuous...')
-            
+
             # Set width; width recorded in pixels
             node_width = PySpin.CIntegerPtr(nodemap.GetNode('Width'))
             if PySpin.IsReadable(node_width) and PySpin.IsWritable(node_width):
@@ -317,7 +328,8 @@ class RecordVideo():
                 print('\tWidth set to {}...'.format(node_width.GetValue()))
 
             else:
-                print('\tUnable to set width; width for sequencer not available on all camera models...')
+                print(
+                    '\tUnable to set width; width for sequencer not available on all camera models...')
 
             # Set height; height recorded in pixels
             node_height = PySpin.CIntegerPtr(nodemap.GetNode('Height'))
@@ -332,46 +344,53 @@ class RecordVideo():
                 print('\tHeight set to %d...' % node_height.GetValue())
 
             else:
-                print('\tUnable to set height; height for sequencer not available on all camera models...')
+                print(
+                    '\tUnable to set height; height for sequencer not available on all camera models...')
 
             ### Disable FrameRateAuto ###
-            node_frame_rate_auto = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionFrameRateAuto"))
+            node_frame_rate_auto = PySpin.CEnumerationPtr(
+                nodemap.GetNode("AcquisitionFrameRateAuto"))
             if not PySpin.IsAvailable(node_frame_rate_auto) or not PySpin.IsWritable(node_frame_rate_auto):
                 print('Unable to turn off Frame Rate Auto (enum retrieval). Aborting...')
                 return False
-            
-            node_frame_rate_auto_off = node_frame_rate_auto.GetEntryByName("Off")
+
+            node_frame_rate_auto_off = node_frame_rate_auto.GetEntryByName(
+                "Off")
             if not PySpin.IsAvailable(node_frame_rate_auto_off) or not PySpin.IsReadable(node_frame_rate_auto_off):
-                print ('Unable to set Frame Rate Auto to Off (entry retrieval). Aborting...')
+                print(
+                    'Unable to set Frame Rate Auto to Off (entry retrieval). Aborting...')
                 return False
-            
+
             frame_rate_auto_off = node_frame_rate_auto_off.GetValue()
-            
+
             node_frame_rate_auto.SetIntValue(frame_rate_auto_off)
-            
-            print ('Frame Rate Auto set to Off...')
-            
+
+            print('Frame Rate Auto set to Off...')
+
             ### Enable AcquisitionFrameRateControlEnable ###
-            node_acquisition_frame_rate_control_enable = PySpin.CBooleanPtr(nodemap.GetNode("AcquisitionFrameRateEnabled"))
+            node_acquisition_frame_rate_control_enable = PySpin.CBooleanPtr(
+                nodemap.GetNode("AcquisitionFrameRateEnabled"))
             if not PySpin.IsAvailable(node_acquisition_frame_rate_control_enable) or not PySpin.IsWritable(node_acquisition_frame_rate_control_enable):
-                print ('Unable to turn on Acquisition Frame Rate Control Enable (bool retrieval). Aborting...')
+                print(
+                    'Unable to turn on Acquisition Frame Rate Control Enable (bool retrieval). Aborting...')
                 return False
-            
+
             node_acquisition_frame_rate_control_enable.SetValue(True)
-            
-            print ('Acquisiton Frame Rate Control Enabled...')
-            
+
+            print('Acquisiton Frame Rate Control Enabled...')
+
             ### Set AcquisitionFrameRate to 10 FPS ###
             if cam.AcquisitionFrameRate.GetAccessMode() != PySpin.RW:
-                print ('Unable to set Frame Rate. Aborting...')
+                print('Unable to set Frame Rate. Aborting...')
                 return False
-            
+
             cam.AcquisitionFrameRate.SetValue(self.fps)
-            
-            print ('Acquisiton Frame Rate set to %s FPS...' % self.fps) 
+
+            print('Acquisiton Frame Rate set to %s FPS...' % self.fps)
 
             # Set exposure time; exposure time recorded in microseconds
-            node_exposure_time = PySpin.CFloatPtr(nodemap.GetNode('ExposureTime'))
+            node_exposure_time = PySpin.CFloatPtr(
+                nodemap.GetNode('ExposureTime'))
             if not PySpin.IsReadable(node_exposure_time) or not PySpin.IsWritable(node_exposure_time):
                 print('Unable to set ExposureTime')
                 return False
@@ -383,7 +402,8 @@ class RecordVideo():
 
             node_exposure_time.SetValue(self.exposure_time)
 
-            print('\tExposure set to {0:.0f}...'.format(node_exposure_time.GetValue()))
+            print('\tExposure set to {0:.0f}...'.format(
+                node_exposure_time.GetValue()))
 
             #  Begin acquiring images
             cam.BeginAcquisition()
@@ -398,30 +418,34 @@ class RecordVideo():
             # *** NOTES ***
             # By default, if no specific color processing algorithm is set, the image
             # processor will default to NEAREST_NEIGHBOR method.
-            processor.SetColorProcessing(PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR)
+            processor.SetColorProcessing(
+                PySpin.SPINNAKER_COLOR_PROCESSING_ALGORITHM_HQ_LINEAR)
 
             self.first_frame_time = datetime.timestamp(datetime.now())
             for i in range(self.frame_images):
                 try:
                     # Time First Frame
-                    
+
                     #  Retrieve next received image
                     image_result = cam.GetNextImage(1000)
 
                     #  Ensure image completion
                     if image_result.IsIncomplete():
-                        print('Image incomplete with image status %d...' % image_result.GetImageStatus())
+                        print('Image incomplete with image status %d...' %
+                              image_result.GetImageStatus())
 
                     else:
                         self.image_queue.put(image_result)
                         #  Print image information; height and width recorded in pixels
                         width = image_result.GetWidth()
                         height = image_result.GetHeight()
-                        if i % 1000 == 0 :
-                            print('Grabbed Image %d, width = %d, height = %d' % (i, width, height))
+                        if i % 100 == 0:
+                            print('Grabbed Image %d/%d, width = %d, height = %d' %
+                                  (i, self.frame_images, width, height))
 
                         #  Convert image to mono 8 and append to list
-                        images.append(processor.Convert(image_result, PySpin.PixelFormat_Mono8))
+                        images.append(processor.Convert(
+                            image_result, PySpin.PixelFormat_Mono8))
 
                         #  Release image
                         image_result.Release()
@@ -442,12 +466,13 @@ class RecordVideo():
 
         return result, images
 
-    def acquire_and_display_images(self,cam, nodemap, nodemap_tldevice):
+    def acquire_and_display_images(self, cam, nodemap, nodemap_tldevice):
 
         sNodemap = cam.GetTLStreamNodeMap()
 
         # Change bufferhandling mode to NewestOnly
-        node_bufferhandling_mode = PySpin.CEnumerationPtr(sNodemap.GetNode('StreamBufferHandlingMode'))
+        node_bufferhandling_mode = PySpin.CEnumerationPtr(
+            sNodemap.GetNode('StreamBufferHandlingMode'))
         if not PySpin.IsReadable(node_bufferhandling_mode) or not PySpin.IsWritable(node_bufferhandling_mode):
             print('Unable to set stream buffer handling mode.. Aborting...')
             return False
@@ -477,7 +502,8 @@ class RecordVideo():
             print('\tWidth set to {}...'.format(node_width.GetValue()))
 
         else:
-            print('\tUnable to set width; width for sequencer not available on all camera models...')
+            print(
+                '\tUnable to set width; width for sequencer not available on all camera models...')
 
         # Set height; height recorded in pixels
         node_height = PySpin.CIntegerPtr(nodemap.GetNode('Height'))
@@ -492,19 +518,24 @@ class RecordVideo():
             print('\tHeight set to %d...' % node_height.GetValue())
 
         else:
-            print('\tUnable to set height; height for sequencer not available on all camera models...')
+            print(
+                '\tUnable to set height; height for sequencer not available on all camera models...')
 
         print('*** IMAGE ACQUISITION ***\n')
         try:
-            node_acquisition_mode = PySpin.CEnumerationPtr(nodemap.GetNode('AcquisitionMode'))
+            node_acquisition_mode = PySpin.CEnumerationPtr(
+                nodemap.GetNode('AcquisitionMode'))
             if not PySpin.IsReadable(node_acquisition_mode) or not PySpin.IsWritable(node_acquisition_mode):
-                print('Unable to set acquisition mode to continuous (enum retrieval). Aborting...')
+                print(
+                    'Unable to set acquisition mode to continuous (enum retrieval). Aborting...')
                 return False
 
             # Retrieve entry node from enumeration node
-            node_acquisition_mode_continuous = node_acquisition_mode.GetEntryByName('Continuous')
+            node_acquisition_mode_continuous = node_acquisition_mode.GetEntryByName(
+                'Continuous')
             if not PySpin.IsReadable(node_acquisition_mode_continuous):
-                print('Unable to set acquisition mode to continuous (entry retrieval). Aborting...')
+                print(
+                    'Unable to set acquisition mode to continuous (entry retrieval). Aborting...')
                 return False
 
             # Retrieve integer value from entry node
@@ -516,40 +547,45 @@ class RecordVideo():
             print('Acquisition mode set to continuous...')
 
             ### Disable FrameRateAuto ###
-            node_frame_rate_auto = PySpin.CEnumerationPtr(nodemap.GetNode("AcquisitionFrameRateAuto"))
+            node_frame_rate_auto = PySpin.CEnumerationPtr(
+                nodemap.GetNode("AcquisitionFrameRateAuto"))
             if not PySpin.IsAvailable(node_frame_rate_auto) or not PySpin.IsWritable(node_frame_rate_auto):
                 print('Unable to turn off Frame Rate Auto (enum retrieval). Aborting...')
                 return False
-            
-            node_frame_rate_auto_off = node_frame_rate_auto.GetEntryByName("Off")
+
+            node_frame_rate_auto_off = node_frame_rate_auto.GetEntryByName(
+                "Off")
             if not PySpin.IsAvailable(node_frame_rate_auto_off) or not PySpin.IsReadable(node_frame_rate_auto_off):
-                print ('Unable to set Frame Rate Auto to Off (entry retrieval). Aborting...')
+                print(
+                    'Unable to set Frame Rate Auto to Off (entry retrieval). Aborting...')
                 return False
-            
+
             frame_rate_auto_off = node_frame_rate_auto_off.GetValue()
-            
+
             node_frame_rate_auto.SetIntValue(frame_rate_auto_off)
-            
-            print ('Frame Rate Auto set to Off...')
-            
+
+            print('Frame Rate Auto set to Off...')
+
             ### Enable AcquisitionFrameRateControlEnable ###
-            node_acquisition_frame_rate_control_enable = PySpin.CBooleanPtr(nodemap.GetNode("AcquisitionFrameRateEnabled"))
+            node_acquisition_frame_rate_control_enable = PySpin.CBooleanPtr(
+                nodemap.GetNode("AcquisitionFrameRateEnabled"))
             if not PySpin.IsAvailable(node_acquisition_frame_rate_control_enable) or not PySpin.IsWritable(node_acquisition_frame_rate_control_enable):
-                print ('Unable to turn on Acquisition Frame Rate Control Enable (bool retrieval). Aborting...')
+                print(
+                    'Unable to turn on Acquisition Frame Rate Control Enable (bool retrieval). Aborting...')
                 return False
-            
+
             node_acquisition_frame_rate_control_enable.SetValue(True)
-            
-            print ('Acquisiton Frame Rate Control Enabled...')
-            
+
+            print('Acquisiton Frame Rate Control Enabled...')
+
             ### Set AcquisitionFrameRate to 10 FPS ###
             if cam.AcquisitionFrameRate.GetAccessMode() != PySpin.RW:
-                print ('Unable to set Frame Rate. Aborting...')
+                print('Unable to set Frame Rate. Aborting...')
                 return False
-            
+
             cam.AcquisitionFrameRate.SetValue(self.fps)
-            
-            print ('Acquisiton Frame Rate set to %s FPS...' % self.fps) 
+
+            print('Acquisiton Frame Rate set to %s FPS...' % self.fps)
 
             #  Begin acquiring images
             #
@@ -572,16 +608,18 @@ class RecordVideo():
             #  overwriting one another. Grabbing image IDs could also accomplish
             #  this.
             device_serial_number = ''
-            node_device_serial_number = PySpin.CStringPtr(nodemap_tldevice.GetNode('DeviceSerialNumber'))
+            node_device_serial_number = PySpin.CStringPtr(
+                nodemap_tldevice.GetNode('DeviceSerialNumber'))
             if PySpin.IsReadable(node_device_serial_number):
                 device_serial_number = node_device_serial_number.GetValue()
-                print('Device serial number retrieved as %s...' % device_serial_number)
+                print('Device serial number retrieved as %s...' %
+                      device_serial_number)
 
             # Close program
             print('Press enter to close the program..')
 
             # Retrieve and display images
-            while(self.continue_recording):
+            while (self.continue_recording):
                 try:
 
                     #  Retrieve next received image
@@ -594,23 +632,24 @@ class RecordVideo():
                     #  Once an image from the buffer is saved and/or no longer
                     #  needed, the image must be released in order to keep the
                     #  buffer from filling up.
-                    
+
                     image_result = cam.GetNextImage(1000)
 
                     #  Ensure image completion
                     if image_result.IsIncomplete():
-                        print('Image incomplete with image status %d ...' % image_result.GetImageStatus())
+                        print('Image incomplete with image status %d ...' %
+                              image_result.GetImageStatus())
 
                     else:
                         # Getting the image data as a numpy array
                         image_data = image_result.GetNDArray()
-                        
+
                         self.image_queue.put(image_data)
                         # self.image_list.append(image_data)
 
                         # Display the image using OpenCV
                         cv2.imshow('Camera Feed', image_data)
-                        
+
                         # Break the loop if 'q' is pressed
                         if cv2.waitKey(1) & 0xFF == ord('q'):
                             break
@@ -618,11 +657,11 @@ class RecordVideo():
                         # Break the loop if 'Enter' is pressed
                         if keyboard.is_pressed('enter'):
                             print('Program is closing...')
-                            
+
                             # Close figure
-                            cv2.destroyAllWindows()             
+                            cv2.destroyAllWindows()
                             # input('Done! Press Enter to exit...')
-                            self.continue_recording=False                        
+                            self.continue_recording = False
 
                     #  Release image
                     #
@@ -681,7 +720,8 @@ class RecordVideo():
                     if frames_buffer:
                         # Clear previous plots and plot time domain signal
                         ax1.clear()
-                        ax1.plot(frames_buffer, color='blue', label='Mean Amplitude')
+                        ax1.plot(frames_buffer, color='blue',
+                                 label='Mean Amplitude')
                         ax1.set_title('Time Domain Signal')
                         ax1.set_xlabel('Frame')
                         ax1.set_ylabel('Amplitude')
@@ -699,7 +739,9 @@ class RecordVideo():
                         last_plot_time = current_time
 
             # Print the current size of the image queue for monitoring
-            print("Current image queue size:", self.image_queue.qsize())
+            # print("queue size:", self.image_queue.qsize(),'exposure time:',self.exposure_time)
+            print('exposure time: %d/%d' %
+                  (self.exposure_time, self.max_exposure_time))
             plt.pause(0.001)  # Small pause to allow GUI updates
 
     def plot_spectrum(self, signal, ax):
@@ -730,12 +772,14 @@ class RecordVideo():
         ax.clear()
 
         # Plot the frequency spectrum
-        ax.plot(freqs, magnitude, label='Magnitude Spectrum', color='b', linewidth=1.5)
+        ax.plot(freqs, magnitude, label='Magnitude Spectrum',
+                color='b', linewidth=1.5)
         ax.set_title('Frequency Spectrum', fontsize=14)
         ax.set_xlabel('Frequency (Hz)', fontsize=12)
         ax.set_ylabel('Magnitude', fontsize=12)
         ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-        ax.axvline(x=0.8, color='r', linestyle='--', label='Lower Bound (0.8 Hz)')
+        ax.axvline(x=0.8, color='r', linestyle='--',
+                   label='Lower Bound (0.8 Hz)')
         ax.axvline(x=4, color='g', linestyle='--', label='Upper Bound (4 Hz)')
 
         # Set x-axis limits to a maximum of 10 Hz
@@ -746,7 +790,7 @@ class RecordVideo():
 
         # Enable legend
         ax.legend(loc='upper right', fontsize=10)
-        
+
     def save_list_to_avi(self, nodemap, nodemap_tldevice, images):
         """
         This function prepares, saves, and cleans up an AVI video from a vector of images.
@@ -767,11 +811,13 @@ class RecordVideo():
 
             # Retrieve device serial number for filename
             device_serial_number = ''
-            node_serial = PySpin.CStringPtr(nodemap_tldevice.GetNode('DeviceSerialNumber'))
+            node_serial = PySpin.CStringPtr(
+                nodemap_tldevice.GetNode('DeviceSerialNumber'))
 
             if PySpin.IsReadable(node_serial):
                 device_serial_number = node_serial.GetValue()
-                print('Device serial number retrieved as %s...' % device_serial_number)
+                print('Device serial number retrieved as %s...' %
+                      device_serial_number)
 
             # Get the current frame rate; acquisition frame rate recorded in hertz
             #
@@ -852,11 +898,12 @@ class RecordVideo():
             # *** NOTES ***
             # Although the video file has been opened, images must be individually
             # appended in order to construct the video.
-            print('Appending %d images to AVI file: %s.avi...' % (len(images), avi_filename))
+            print('Appending %d images to AVI file: %s.avi...' %
+                  (len(images), avi_filename))
 
             for i in range(len(images)):
                 avi_recorder.Append(images[i])
-                if i %1000 == 0 :
+                if i % 1000 == 0:
                     print('Appended image %d...' % i)
 
             # Close AVI file
@@ -875,7 +922,7 @@ class RecordVideo():
 
         return result
 
-    def run_single_camera(self,cam):
+    def run_single_camera(self, cam):
         try:
             result = True
 
@@ -889,7 +936,7 @@ class RecordVideo():
 
             # Retrieve GenICam nodemap
             nodemap = cam.GetNodeMap()
-            
+
             # Configure image settings
             if not self.configure_custom_image_settings(cam):
                 return False
@@ -914,7 +961,33 @@ class RecordVideo():
 
         return result
 
-    def run_single_camera_show(self,cam):
+    def start_acquisition(self, cam):
+        """
+        Starts the acquisition thread and listens for keyboard inputs for adjustments.
+        """
+
+        while self.continue_recording:
+            self.max_exposure_time = cam.ExposureTime.GetMax()
+            for i in range(1, 10):
+                if keyboard.is_pressed(str(i)):
+                    self.exposure_time = int(
+                        cam.ExposureTime.GetMax() * i / 10)
+                    print(f'Adjusting exposure to: {self.exposure_time} us')
+                    self.configure_exposure(cam)
+
+            if keyboard.is_pressed('0'):
+                self.exposure_time = cam.ExposureTime.GetMax()
+                print(
+                    f'Adjusting exposure to maximum: {self.exposure_time} us')
+                self.configure_exposure(cam)
+
+            if keyboard.is_pressed('q'):
+                self.continue_recording
+                break
+
+            sleep(0.01)
+
+    def run_single_camera_show(self, cam):
         try:
             result = True
 
@@ -925,8 +998,8 @@ class RecordVideo():
 
             # Retrieve GenICam nodemap
             nodemap = cam.GetNodeMap()
-            
-             # Configure image settings
+
+            # Configure image settings
             if not self.configure_custom_image_settings(cam):
                 return False
 
@@ -936,15 +1009,20 @@ class RecordVideo():
 
             # Acquire images
             # result &= self.acquire_and_display_images(cam, nodemap, nodemap_tldevice)
-            
-            acquisition_thread = threading.Thread(target=self.acquire_and_display_images, args=(cam, nodemap, nodemap_tldevice))
-            
+
+            acquisition_thread = threading.Thread(
+                target=self.acquire_and_display_images, args=(cam, nodemap, nodemap_tldevice))
+            exposure_thread = threading.Thread(
+                target=self.start_acquisition, args=(cam,))
+
             acquisition_thread.start()
+            exposure_thread.start()
 
             self.calculate_and_plot_mean()  # Start the plotting on the main thread
 
             acquisition_thread.join()
-            
+            exposure_thread.join()
+
             # Deinitialize camera
             cam.DeInit()
 
@@ -955,9 +1033,9 @@ class RecordVideo():
         return result
 
     def display_images(self):
-        
+
         result = True
-        
+
         if self.cam_list == None:
             print('Not enough cameras!')
             return False
@@ -968,7 +1046,7 @@ class RecordVideo():
 
             result &= self.run_single_camera_show(cam)
             print('Camera %d example complete... \n' % i)
-        
+
         # del cam
 
         # # Clear camera list before releasing system
@@ -982,7 +1060,7 @@ class RecordVideo():
     def start(self) -> bool:
 
         result = True
-        
+
         if self.cam_list == None:
             print('Not enough cameras!')
             return False
@@ -993,7 +1071,7 @@ class RecordVideo():
 
             result &= self.run_single_camera(cam)
             print('Camera %d example complete... \n' % i)
-        
+
         # del cam
 
         # # Clear camera list before releasing system
@@ -1001,8 +1079,9 @@ class RecordVideo():
 
         # # Release instance
         # self.system.ReleaseInstance()
-        
+
         return result
+
 
 if __name__ == '__main__':
     record = RecordVideo()

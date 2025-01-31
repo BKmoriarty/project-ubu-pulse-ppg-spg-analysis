@@ -1,15 +1,15 @@
-import os
-os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
-
-import cv2
-from matplotlib.widgets import MultiCursor
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.fft import fft, fftfreq
-from scipy.signal import butter, filtfilt, find_peaks
-from time import process_time
 import torch
+from time import process_time
+import datetime
+from scipy.signal import butter, filtfilt, find_peaks
+from scipy.fft import fft, fftfreq
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from matplotlib.widgets import MultiCursor
+import cv2
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 class ImageCropper:
@@ -56,9 +56,10 @@ class ImageCropper:
         cv2.destroyAllWindows()
         return self.x_start, self.y_start, self.x_end, self.y_end
 
+
 class Analysis_PPG_SPG:
 
-    def __init__(self, video_path, excel_path, size_ppg, size_spg, exposure_time=2200, fps=30, cache=False, cut_time_delay=0.2):
+    def __init__(self, video_path, excel_path, size_ppg, size_spg, exposure_time=2200, fps=30, cache=False, cut_time_delay=0.2, time_record=30):
         self.size_ppg = size_ppg
         self.size_spg = size_spg
         self.video_path = video_path
@@ -69,6 +70,7 @@ class Analysis_PPG_SPG:
         self.fps = fps
         self.cache = cache
         self.cut_time_delay = cut_time_delay
+        self.time_record = time_record
 
     def __del__(self):
         cv2.destroyAllWindows()
@@ -156,28 +158,31 @@ class Analysis_PPG_SPG:
                           for j in range(0, shape[1]-self.size_block+1, self.size_block)]
                          for i in range(0, shape[0]-self.size_block+1, self.size_block)])
 
-    def cal_contrast_gpu(self,frame):
+    def cal_contrast_gpu(self, frame):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        
+
         # Convert frame to GPU tensor
         frame_tensor = torch.from_numpy(frame).float().to(device)
         shape = frame_tensor.shape
-        
+
         # Initialize output tensor
         height = (shape[0] - self.size_block + 1) // self.size_block
         width = (shape[1] - self.size_block + 1) // self.size_block
         result = torch.zeros((height, width), device=device)
-        
+
         # Unfold the frame into blocks
-        blocks = frame_tensor.unfold(0, self.size_block, self.size_block).unfold(1, self.size_block, self.size_block)
-        
+        blocks = frame_tensor.unfold(0, self.size_block, self.size_block).unfold(
+            1, self.size_block, self.size_block)
+
         # Calculate mean and std for each block
-        means = blocks.mean(dim=(2,3))
-        stds = blocks.std(dim=(2,3), unbiased=True)  # Added unbiased=True to match numpy
-        
+        means = blocks.mean(dim=(2, 3))
+        # Added unbiased=True to match numpy
+        stds = blocks.std(dim=(2, 3), unbiased=True)
+
         # Calculate contrast
-        result = stds / (means + 1e-6)  # Add small epsilon to avoid division by zero
-        
+        # Add small epsilon to avoid division by zero
+        result = stds / (means + 1e-6)
+
         return result.cpu().numpy()
 
     def extract_video_frames(self, video_path):
@@ -185,15 +190,21 @@ class Analysis_PPG_SPG:
 
         _, frame = cap.read()
 
+        # crop = ImageCropper(frame)
+        # x1, y1, x2, y2 = crop.start_cropping()
+
+        # x1_ppg, y1_ppg, x2_ppg, y2_ppg = x1, y1, x2, y2
+
         x1_ppg, y1_ppg, x2_ppg, y2_ppg = self.get_center_crop_position(
             frame.shape, self.size_ppg)
+
         x1_spg, y1_spg, x2_spg, y2_spg = self.get_center_crop_position(
             frame.shape, self.size_spg)
 
         # color_ppg = (0, 255, 0)
         # color_spg = (255, 0, 0)
         # thickness = 2
-        
+
         # cv2.rectangle(frame, (x1_ppg, y1_ppg),
         #               (x2_ppg, y2_ppg), color_ppg, thickness)
         # cv2.rectangle(frame, (x1_spg, y1_spg),
@@ -241,7 +252,7 @@ class Analysis_PPG_SPG:
 
         length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) + 1
         i = 0
-        
+
         use_GPU = False
         # Check GPU availability
         print(f"CUDA Available: {torch.cuda.is_available()}")
@@ -255,7 +266,7 @@ class Analysis_PPG_SPG:
 
         # video = cv2.VideoWriter(
         #     "roi.avi", cv2.VideoWriter_fourcc(*'XVID'), self.fps, (self.size_ppg, self.size_ppg))
-        
+
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
@@ -272,8 +283,9 @@ class Analysis_PPG_SPG:
             # Calculate the mean pixel intensity in the ROI
             signal_intensity = np.mean(roi_ppg)
             signal_ppg.append(signal_intensity)
-                
-            contrast = self.cal_contrast_gpu(roi_spg) if use_GPU else self.cal_contrast(roi_spg)
+
+            contrast = self.cal_contrast_gpu(
+                roi_spg) if use_GPU else self.cal_contrast(roi_spg)
             mean_contrast_frame.append(np.mean(contrast))  # mean contrast
 
             # Calculate mean exposure using the formula: 1 / (2 * T * K^2)
@@ -286,22 +298,22 @@ class Analysis_PPG_SPG:
 
             # video.write(frame)
 
-            if (i == 0):
-                fig, ax01 = plt.subplots(1, 1)
-                ax01.imshow(frame[y1_ppg:y2_ppg, x1_ppg:x2_ppg])
+            # if (i == 0):
+            #     fig, ax01 = plt.subplots(1, 1)
+            #     ax01.imshow(frame[y1_ppg:y2_ppg, x1_ppg:x2_ppg])
 
-                fig, ax02 = plt.subplots(1, 1)
-                ax02.imshow(roi_ppg, cmap='hot', )
+            #     fig, ax02 = plt.subplots(1, 1)
+            #     ax02.imshow(roi_ppg, cmap='hot', )
 
-                fig, ax03 = plt.subplots(1, 1)
-                ax03.imshow(signal_intensity * np.ones(
-                    (roi_ppg.shape[0], roi_ppg.shape[1])), cmap='hot')
+            #     fig, ax03 = plt.subplots(1, 1)
+            #     ax03.imshow(signal_intensity * np.ones(
+            #         (roi_ppg.shape[0], roi_ppg.shape[1])), cmap='hot')
 
-                fig, ax04 = plt.subplots(1, 1)
-                ax04.imshow(contrast, cmap='hot', )
+            #     fig, ax04 = plt.subplots(1, 1)
+            #     ax04.imshow(contrast, cmap='hot', )
 
-                fig, ax05 = plt.subplots(1, 1)
-                ax05.imshow(exposure, cmap='hot', )
+            #     fig, ax05 = plt.subplots(1, 1)
+            #     ax05.imshow(exposure, cmap='hot', )
 
             end_process = process_time()
             i = i+1
@@ -372,14 +384,14 @@ class Analysis_PPG_SPG:
         df = pd.read_excel(file_name_excel)
         # Convert the date column to datetime format if it's not already
         df['Time'] = pd.to_datetime(df['Data'], format='%H:%M:%S.%f')
-        df['Value'] = pd.to_numeric(df['Value'], errors='coerce')
+        # df['Time'] = pd.to_datetime(df['Data'])
 
         # Define your start and end date
         # start_date = pd.to_datetime('17:41:48.318345', format='%H:%M:%S.%f')
         # end_date = pd.to_datetime('17:42:08.318345', format='%H:%M:%S.%f')
 
         end_time = df['Time'].max()
-        start_time = end_time - pd.Timedelta(seconds=20)
+        start_time = end_time - pd.Timedelta(seconds=self.time_record)
 
         start_date = start_time
         end_date = end_time
@@ -388,9 +400,12 @@ class Analysis_PPG_SPG:
         filtered_df = df[(df['Time'] >= start_date) & (df['Time'] <= end_date)]
 
         # Calculate the time differences as a pandas Series
-        time_excels = (pd.Series(filtered_df['Time']) - filtered_df['Time'].min())
+        time_excels = (
+            pd.Series(filtered_df['Time']) - filtered_df['Time'].min())
         time_excel = time_excels.dt.total_seconds()
         amplitude_excel = pd.Series(filtered_df['Value']).values
+
+        # print(time_excel)
 
         return [time_excel, amplitude_excel]
 
@@ -439,7 +454,8 @@ class Analysis_PPG_SPG:
         power = np.abs(np.array(yf))**2 / n
 
         # Frequency domain: Find peak frequency within heart rate range
-        heart_rate_indices = (xf >= heart_rate_freq_range[0]) & (xf <= heart_rate_freq_range[1])
+        heart_rate_indices = (xf >= heart_rate_freq_range[0]) & (
+            xf <= heart_rate_freq_range[1])
         peak_index = np.argmax(power[heart_rate_indices])
         peak_power = power[heart_rate_indices][peak_index]
 
@@ -450,9 +466,9 @@ class Analysis_PPG_SPG:
         # Define signal and noise areas
         signal_area = peak_power / 2 + variance_signal
         noise_area = np.sum(power) - signal_area
-        
-        print('Signal area: ', signal_area)
-        print('Noise area: ', noise_area)
+
+        # print('Signal area: ', signal_area)
+        # print('Noise area: ', noise_area)
 
         # Calculate SNR
         snr = 10 * np.log10(signal_area / noise_area)
@@ -504,11 +520,15 @@ class Analysis_PPG_SPG:
         return i_max_peak
 
     def find_peak_freq_excel(self, data, time):
-        distance = self.fps * (60/88)
         # Find peaks
         # Adjust these parameters as needed for your specific data
         peaks, _ = find_peaks(data, height=None,
-                              threshold=None, distance=distance)
+                              threshold=None, distance=60)
+
+        peaks = peaks[1:]
+
+        # print(peaks)
+        # print(time[peaks])
 
         # Calculate heart rate (if peaks represent heartbeats)
         time_diff = np.diff(time[peaks])
@@ -517,35 +537,39 @@ class Analysis_PPG_SPG:
         return peaks, heart_rate
 
     def main(self):
-        if (self.cache):
-            try:
-                signal_ppg = np.load(
-                    f'storage/{self.dir_path}/signal_ppg.npy')
-                mean_exposure_frame = np.load(
-                    f'storage/{self.dir_path}/mean_exposure_frame.npy')
-                mean_contrast_frame = np.load(
-                    f'storage/{self.dir_path}/mean_contrast_frame.npy')
-            except:
-                print("Error: Cache files not found. Extracting signal from video.")
-                cap, position = self.extract_video_frames(self.video_path)
-                signal_ppg, mean_contrast_frame, mean_exposure_frame = self.extract_signal(
-                    cap, position)
-                np.save(f'storage/{self.dir_path}/signal_ppg.npy', signal_ppg)
-                np.save(
-                    f'storage/{self.dir_path}/mean_exposure_frame.npy', mean_exposure_frame)
-                np.save(
-                    f'storage/{self.dir_path}/mean_contrast_frame.npy', mean_contrast_frame)
-        else:
-            cap, position = self.extract_video_frames(self.video_path)
-            signal_ppg, mean_contrast_frame, mean_exposure_frame = self.extract_signal(
-                cap, position
-            )
-            np.save(f'storage/{self.dir_path}/signal_ppg.npy', signal_ppg)
-            np.save(
-                f'storage/{self.dir_path}/mean_exposure_frame.npy', mean_exposure_frame)
-            np.save(
-                f'storage/{self.dir_path}/mean_contrast_frame.npy', mean_contrast_frame)
+        # if (self.cache):
+        #     try:
+        #         signal_ppg = np.load(
+        #             f'storage/{self.dir_path}/signal_ppg.npy')
+        #         mean_exposure_frame = np.load(
+        #             f'storage/{self.dir_path}/mean_exposure_frame.npy')
+        #         mean_contrast_frame = np.load(
+        #             f'storage/{self.dir_path}/mean_contrast_frame.npy')
+        #     except:
+        #         print("Error: Cache files not found. Extracting signal from video.")
+        #         cap, position = self.extract_video_frames(self.video_path)
+        #         signal_ppg, mean_contrast_frame, mean_exposure_frame = self.extract_signal(
+        #             cap, position)
+        #         np.save(f'storage/{self.dir_path}/signal_ppg.npy', signal_ppg)
+        #         np.save(
+        #             f'storage/{self.dir_path}/mean_exposure_frame.npy', mean_exposure_frame)
+        #         np.save(
+        #             f'storage/{self.dir_path}/mean_contrast_frame.npy', mean_contrast_frame)
+        # else:
+        #     cap, position = self.extract_video_frames(self.video_path)
+        #     signal_ppg, mean_contrast_frame, mean_exposure_frame = self.extract_signal(
+        #         cap, position
+        #     )
+        #     np.save(f'storage/{self.dir_path}/signal_ppg.npy', signal_ppg)
+        #     np.save(
+        #         f'storage/{self.dir_path}/mean_exposure_frame.npy', mean_exposure_frame)
+        #     np.save(
+        #         f'storage/{self.dir_path}/mean_contrast_frame.npy', mean_contrast_frame)
 
+        cap, position = self.extract_video_frames(self.video_path)
+        signal_ppg, mean_contrast_frame, mean_exposure_frame = self.extract_signal(
+            cap, position
+        )
         # =========================== PPG ===========================
         signal_freq_range_ppg = (0.83, 4)  # Hz (typical range for heart rate)
         noise_freq_range_ppg = [
@@ -554,7 +578,7 @@ class Analysis_PPG_SPG:
         fps = self.fps
         signal_values_fft = self.perform_fft(signal_ppg, fps)
 
-        fs = signal_ppg.size / 20
+        fs = signal_ppg.size / self.time_record
         time_ppg = np.arange(signal_ppg.size) / fs
 
         filtered_ppg, filtered_signal_fft1 = self.filter_signal(
@@ -574,7 +598,7 @@ class Analysis_PPG_SPG:
         print(
             f"Heart rate of the iPPG FFT: {heart_rate_filtered_ppg:.2f} bpm at {filtered_signal_fft1[0][max_filtered_ppg]} Hz")
 
-        fig, (ax4, ax5, ax6) = plt.subplots(3, 1, figsize=(11, 5))
+        fig, (ax4, ax5, ax6) = plt.subplots(3, 1, figsize=(12, 6))
 
         ax4.plot(time_ppg, signal_ppg, color='b', label='iPPG Raw Signal')
         # ax4.legend()
@@ -594,16 +618,16 @@ class Analysis_PPG_SPG:
         ax5.set_xlabel('Frequency (Hz)')
         ax5.set_ylabel('Amplitude')
 
-        ax6.plot(time_ppg, filtered_ppg, color='r',
+        ax6.plot(time_ppg, filtered_ppg, color='b',
                  label='iPPG Filtered Signal')
         ax6.plot(time_ppg[peaks_filtered_signal], filtered_ppg[peaks_filtered_signal],
-                 color='r', label="Peaks iPPG", marker='o', linestyle='')
+                 color='b', label="Peaks iPPG", marker='o', linestyle='')
         # ax6.legend()
         ax6.set_xlabel('Time (s)')
         ax6.set_ylabel('Amplitude')
 
         fig.tight_layout()
-        fig.savefig(f'storage/{self.dir_path}/iPPG.png')
+        # fig.savefig(f'storage/{self.dir_path}/iPPG.png')
 
         # =========================== SPG ===================================
         # Hz (typical range for heart rate)
@@ -627,7 +651,7 @@ class Analysis_PPG_SPG:
         print(
             f"Heart rate of the SPG FFT: {heart_rate_spg:.2f} bpm at {filtered_spg_fft[0][max_filtered_spg]} Hz")
 
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(11, 5))
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 6))
 
         ax1.plot(time_spg, mean_exposure_frame,
                  color='b', label='SPG Raw Signal')
@@ -657,7 +681,7 @@ class Analysis_PPG_SPG:
         ax3.set_ylabel('Amplitude')
 
         fig.tight_layout()
-        fig.savefig(f'storage/{self.dir_path}/SPG.png')
+        # fig.savefig(f'storage/{self.dir_path}/SPG.png')
 
         # =========================== import excel ===========================
         excel_data = self.load_excel(self.excel_path)
@@ -676,8 +700,8 @@ class Analysis_PPG_SPG:
         # [filtered_excel, filtered_excel_fft]= self.filter_signal(
         #     excel_data[1], fps_excel, signal_freq_range_excel[0], signal_freq_range_excel[1])
 
-        peaks_filtered_excel, heart_rate_filtered_excel = self.find_peak_freq_excel(
-            filtered_excel, excel_data[0])
+        # peaks_filtered_excel, heart_rate_filtered_excel = self.find_peak_freq_excel(
+        #     filtered_excel, excel_data[0])
 
         max_filtered_excel = self.find_one_peaks(
             filtered_excel_fft[1])
@@ -685,7 +709,7 @@ class Analysis_PPG_SPG:
         print(
             f"Heart rate of the cPPG FFT: {heart_rate_excel:.2f} bpm at {filtered_excel_fft[0][max_filtered_excel]} Hz")
 
-        fig, (ax10, ax11, ax12) = plt.subplots(3, 1, figsize=(11, 5))
+        fig, (ax10, ax11, ax12) = plt.subplots(3, 1, figsize=(12, 6))
 
         ax10.plot(excel_data[0], excel_data[1],
                   color='b', label='cPPG Signal')
@@ -706,40 +730,40 @@ class Analysis_PPG_SPG:
 
         ax12.plot(excel_data[0], filtered_excel/np.max(filtered_excel), color='r',
                   label='cPPG Filtered Signal')
-        ax12.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
-                  color='r', label="Peaks cPPG", marker='o', linestyle='')
+        # ax12.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
+        #           color='r', label="Peaks cPPG", marker='o', linestyle='')
         # ax12.legend()
         ax12.set_xlabel('Time (s)')
         ax12.set_ylabel('Amplitude')
 
         fig.tight_layout()
-        fig.savefig(f'storage/{self.dir_path}/cPPG.png')
-        
+        # fig.savefig(f'storage/{self.dir_path}/cPPG.png')
+
         # =========================== SNR PEAK METHOD ===========================
-        
+
         heart_rate_freq_range_ppg = (0.9, 3)
         heart_rate_freq_range_spg = (0.9, 3)
         heart_rate_freq_range_excel = (0.9, 3)
-        
+
         # ppg
         snr_filtered_ppg, frequencies_filtered_ppg, power_filtered_ppg = self.calculate_snr_hybrid_method(
             filtered_ppg, fps, heart_rate_freq_range_ppg)
 
-        print(f"SNR of the iPPG values: {snr_filtered_ppg:.2f} dB")
+        # print(f"SNR of the iPPG values: {snr_filtered_ppg:.2f} dB")
 
         # spg
         snr_filtered_spg, frequencies_filtered_spg, power_filtered_spg = self.calculate_snr_hybrid_method(
             filtered_spg, fps, heart_rate_freq_range_spg)
 
-        print(
-            f"SNR of the SPG values: {snr_filtered_spg:.2f} dB")
+        # print(
+        # f"SNR of the SPG values: {snr_filtered_spg:.2f} dB")
 
         # excel
         snr_filtered_excel, frequencies_excel, power_excel = self.calculate_snr_hybrid_method(
             filtered_excel, fps_excel, heart_rate_freq_range_excel)
 
-        print(
-            f"SNR of the cPPG values: {snr_filtered_excel:.2f} dB")
+        # print(
+        #     f"SNR of the cPPG values: {snr_filtered_excel:.2f} dB")
 
         # =========================== SNR ===========================
 
@@ -832,7 +856,7 @@ class Analysis_PPG_SPG:
             f"Average time delay between SPG and PPG peaks: {avg_time_delay:.6f} seconds")
         # avg_time_delay, spg_peak_times, ppg_peak_times, peak_delays
 
-        fig, (ax13, ax14, ax15) = plt.subplots(3, 1, figsize=(16, 9))  #
+        fig, (ax13, ax14, ax15) = plt.subplots(3, 1, figsize=(12, 6))  #
 
         ax13.plot(time_plot, filtered_ppg/np.max(filtered_ppg),
                   color='b', label='iPPG Signal')
@@ -899,7 +923,7 @@ class Analysis_PPG_SPG:
 
         # save figure to file
         fig.tight_layout()
-        fig.savefig(f'storage/{self.dir_path}/time_delay.png')
+        # fig.savefig(f'storage/{self.dir_path}/time_delay.png')
 
         # =========================== Plotting ===========================
 
@@ -923,19 +947,19 @@ class Analysis_PPG_SPG:
         offset_ppg = np.mean((filtered_ppg/np.max(filtered_ppg))
                              [peaks_filtered_signal])
 
-        offset_excel = np.mean((filtered_excel/np.max(filtered_excel))
-                               [peaks_filtered_excel])
+        # offset_excel = np.mean((filtered_excel/np.max(filtered_excel))
+        #                        [peaks_filtered_excel])
 
-        offset_ppg_excel = 1 + np.abs(offset_ppg - offset_excel)
+        # offset_ppg_excel = 1 + np.abs(offset_ppg - offset_excel)
 
-        ax8.plot(time_plot, (filtered_ppg/np.max(filtered_ppg)) * offset_ppg_excel,
+        ax8.plot(time_plot, (filtered_ppg/np.max(filtered_ppg)),  # * offset_ppg_excel,
                  color='b', label='iPPG Signal')
-        ax8.plot(time_plot[peaks_filtered_signal], (filtered_ppg/np.max(filtered_ppg))[peaks_filtered_signal] * offset_ppg_excel,
+        ax8.plot(time_plot[peaks_filtered_signal], (filtered_ppg/np.max(filtered_ppg))[peaks_filtered_signal],  # * offset_ppg_excel,
                  color='b', label='Peaks iPPG', marker='o', linestyle='')
         ax8.plot(excel_data[0], filtered_excel/np.max(filtered_excel),
                  color='r', label='cPPG Signal', linestyle='--')
-        ax8.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
-                 color='r', label='Peaks cPPG', marker='o', linestyle='')
+        # ax8.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
+        #          color='r', label='Peaks cPPG', marker='o', linestyle='')
 
         ax8.grid()
         # ax8.legend()
@@ -945,8 +969,8 @@ class Analysis_PPG_SPG:
 
         ax9.plot(excel_data[0], filtered_excel/np.max(filtered_excel),
                  color='r', label='cPPG Signal', linestyle='--')
-        ax9.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
-                 color='r', label='Peaks cPPG', marker='o', linestyle='')
+        # ax9.plot(excel_data[0][peaks_filtered_excel], (filtered_excel/np.max(filtered_excel))[peaks_filtered_excel],
+        #          color='r', label='Peaks cPPG', marker='o', linestyle='')
         ax9.plot(time_plot, filtered_spg/np.max(filtered_spg),
                  color='g', label="SPG Signal")
         ax9.plot(time_plot[peaks_filtered_spg], (filtered_spg/np.max(filtered_spg))[peaks_filtered_spg],
@@ -963,7 +987,7 @@ class Analysis_PPG_SPG:
 
         # save figure to file
         fig.tight_layout()
-        fig.savefig(f'storage/{self.dir_path}/integrate_signal.png')
+        # fig.savefig(f'storage/{self.dir_path}/integrate_signal.png')
 
         plt.show()
 
@@ -975,11 +999,15 @@ if __name__ == "__main__":
     exposure_time = 6000  # us
     size_ppg = 200  # W x H 200
     size_spg = 100  # W x H 100
-    fps = 300  # Hz 88
-    cache = True
+    fps = 120  # Hz 88
+    cache = False
     cut_time_delay = 0.2
 
-    folder = "2024-12-10 16_24_53 tee 2500 300 (200, 200) rate-10 good"
+    # folder = "TI/2025-01-28 13_49_40 tee 6000 120 (200, 200) rate-10"
+    # video_path = f"อาสาสมัคร/{folder}/video-0000.avi"
+    # serial_path = f"อาสาสมัคร/{folder}/serial.xlsx"
+
+    folder = "2025-01-22 14_49_34 tee 2500 300 (200, 200)"
     video_path = f"storage/{folder}/video-0000.avi"
     serial_path = f"storage/{folder}/serial.xlsx"
 
